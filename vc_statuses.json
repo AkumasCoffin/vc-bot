@@ -1,0 +1,686 @@
+{
+  "version": 1,
+  "generatedAt": "2026-02-24T01:26:41.207Z",
+  "source": "vc_statuses.txt",
+  "pools": {
+    "any": [],
+    "empty": [],
+    "solo": [],
+    "crowded": [],
+    "connected": []
+  },
+  "rules": [
+    {
+      "cond": "time=dawn humans=0",
+      "text": "😇 Halo on — cozy idle"
+    },
+    {
+      "cond": "time=dawn humans=0",
+      "text": "👼 Soft reset — wings tucked"
+    },
+    {
+      "cond": "time=dawn humans=1",
+      "text": "😇 1:1 — angel vibes only"
+    },
+    {
+      "cond": "time=dawn humans=2",
+      "text": "👼 Duo — gentle wingspan"
+    },
+    {
+      "cond": "time=dawn humans>=3",
+      "text": "😇 {humans} here — choir practice"
+    },
+    {
+      "cond": "time=morning humans=0",
+      "text": "😇 Morning halo — blanket mode"
+    },
+    {
+      "cond": "time=morning humans=1",
+      "text": "👼 1:1 — soft sunshine"
+    },
+    {
+      "cond": "time=morning humans=2",
+      "text": "😇 Duo — wholesome choir"
+    },
+    {
+      "cond": "time=morning humans>=3",
+      "text": "👼 {humans} here — angels in stereo"
+    },
+    {
+      "cond": "time=night humans=0",
+      "text": "😈 Cozy devil hours"
+    },
+    {
+      "cond": "time=night humans=0",
+      "text": "🖤 Halo slipped (quietly)"
+    },
+    {
+      "cond": "time=night humans=1",
+      "text": "😈 1:1 — devil on shoulder"
+    },
+    {
+      "cond": "time=night humans=2",
+      "text": "😈 Duo — little devils (polite)"
+    },
+    {
+      "cond": "time=night humans>=3",
+      "text": "😈 {humans} here — hell’s book club"
+    },
+    {
+      "cond": "time=midnight humans=0",
+      "text": "😈 Halo fully gone"
+    },
+    {
+      "cond": "time=midnight humans=1",
+      "text": "😈 1:1 — devil deals only"
+    },
+    {
+      "cond": "time=midnight humans=2",
+      "text": "😈 Duo — sin committee"
+    },
+    {
+      "cond": "time=midnight humans>=3",
+      "text": "😈 {humans} here — too many devils"
+    },
+    {
+      "cond": "time=dawn humans=0",
+      "text": "🧸 Cozy idle"
+    },
+    {
+      "cond": "time=dawn humans=0",
+      "text": "🌤️ Soft reset"
+    },
+    {
+      "cond": "time=dawn humans=0",
+      "text": "☕ Warming up"
+    },
+    {
+      "cond": "time=dawn humans=0",
+      "text": "🌿 Quiet room"
+    },
+    {
+      "cond": "time=dawn humans=0",
+      "text": "💛 Safe vibes"
+    },
+    {
+      "cond": "time=dawn humans=1",
+      "text": "🫶 1:1 cozy chat"
+    },
+    {
+      "cond": "time=dawn humans=1",
+      "text": "☕ 1:1 slow sips"
+    },
+    {
+      "cond": "time=dawn humans=1",
+      "text": "🧸 1:1 blanket vibes"
+    },
+    {
+      "cond": "time=dawn humans=1",
+      "text": "🌤️ 1:1 gentle talk"
+    },
+    {
+      "cond": "time=dawn humans=1",
+      "text": "💛 1:1 comfort mode"
+    },
+    {
+      "cond": "time=dawn humans=2",
+      "text": "🧸 Duo cuddlecore"
+    },
+    {
+      "cond": "time=dawn humans=2",
+      "text": "☕ Duo warm chatter"
+    },
+    {
+      "cond": "time=dawn humans=2",
+      "text": "🌿 Duo calm vibes"
+    },
+    {
+      "cond": "time=dawn humans=2",
+      "text": "💛 Duo comfort-first"
+    },
+    {
+      "cond": "time=dawn humans=2",
+      "text": "🌤️ Duo soft talk"
+    },
+    {
+      "cond": "time=dawn humans>=3",
+      "text": "🧸 {humans} cozy pile"
+    },
+    {
+      "cond": "time=dawn humans>=3",
+      "text": "☕ {humans} warm chatter"
+    },
+    {
+      "cond": "time=dawn humans>=3",
+      "text": "💛 {humans} safe space"
+    },
+    {
+      "cond": "time=dawn humans>=3",
+      "text": "🌿 {humans} gentle vibes"
+    },
+    {
+      "cond": "time=dawn humans>=3",
+      "text": "🌤️ {humans} soft start"
+    },
+    {
+      "cond": "time=morning humans=0",
+      "text": "🧸 Blanket mode"
+    },
+    {
+      "cond": "time=morning humans=0",
+      "text": "☕ Coffee on"
+    },
+    {
+      "cond": "time=morning humans=0",
+      "text": "🌞 Soft sunshine"
+    },
+    {
+      "cond": "time=morning humans=0",
+      "text": "🍯 Sweet vibes"
+    },
+    {
+      "cond": "time=morning humans=0",
+      "text": "🫶 Gentle idle"
+    },
+    {
+      "cond": "time=morning humans=0",
+      "text": "🌿 Calm room"
+    },
+    {
+      "cond": "time=morning humans=0",
+      "text": "🧼 Clean audio"
+    },
+    {
+      "cond": "time=morning humans=0",
+      "text": "😇 Good-mood mode"
+    },
+    {
+      "cond": "time=morning humans=1",
+      "text": "🧸 1:1 comfy"
+    },
+    {
+      "cond": "time=morning humans=1",
+      "text": "☕ 1:1 morning chat"
+    },
+    {
+      "cond": "time=morning humans=1",
+      "text": "🌞 1:1 sunshine talk"
+    },
+    {
+      "cond": "time=morning humans=1",
+      "text": "🍯 1:1 sweet teasing"
+    },
+    {
+      "cond": "time=morning humans=1",
+      "text": "🫶 1:1 gentle vibes"
+    },
+    {
+      "cond": "time=morning humans=1",
+      "text": "🌿 1:1 calm mode"
+    },
+    {
+      "cond": "time=morning humans=1",
+      "text": "🧷 1:1 boundaries up"
+    },
+    {
+      "cond": "time=morning humans=1",
+      "text": "🐶 1:1 good-pet (soft)"
+    },
+    {
+      "cond": "time=morning humans=2",
+      "text": "🧸 Duo comfy"
+    },
+    {
+      "cond": "time=morning humans=2",
+      "text": "☕ Duo coffee talk"
+    },
+    {
+      "cond": "time=morning humans=2",
+      "text": "🌞 Duo sunny chatter"
+    },
+    {
+      "cond": "time=morning humans=2",
+      "text": "🍯 Duo sweet teasing"
+    },
+    {
+      "cond": "time=morning humans=2",
+      "text": "🫶 Duo kind vibes"
+    },
+    {
+      "cond": "time=morning humans=2",
+      "text": "🌿 Duo calm pace"
+    },
+    {
+      "cond": "time=morning humans=2",
+      "text": "🧷 Duo play nice"
+    },
+    {
+      "cond": "time=morning humans>=3",
+      "text": "🧸 {humans} cozy crowd"
+    },
+    {
+      "cond": "time=morning humans>=3",
+      "text": "☕ {humans} coffee chatter"
+    },
+    {
+      "cond": "time=morning humans>=3",
+      "text": "🌞 {humans} sunny chaos"
+    },
+    {
+      "cond": "time=morning humans>=3",
+      "text": "🍯 {humans} sweet banter"
+    },
+    {
+      "cond": "time=morning humans>=3",
+      "text": "🫶 {humans} kind crew"
+    },
+    {
+      "cond": "time=morning humans>=3",
+      "text": "🌿 {humans} calm-ish"
+    },
+    {
+      "cond": "time=morning humans>=3",
+      "text": "🫣 {humans} many ears"
+    },
+    {
+      "cond": "time=midday humans=0",
+      "text": "🟢 Standby"
+    },
+    {
+      "cond": "time=midday humans=0",
+      "text": "📎 Keep it tidy"
+    },
+    {
+      "cond": "time=midday humans=0",
+      "text": "🧾 Check-in ready"
+    },
+    {
+      "cond": "time=midday humans=0",
+      "text": "🧠 Focus mode"
+    },
+    {
+      "cond": "time=midday humans=0",
+      "text": "🫦 Flirt queued"
+    },
+    {
+      "cond": "time=midday humans=1",
+      "text": "🟢 1:1 mode"
+    },
+    {
+      "cond": "time=midday humans=1",
+      "text": "📎 1:1 tidy tone"
+    },
+    {
+      "cond": "time=midday humans=1",
+      "text": "🧾 1:1 check-in"
+    },
+    {
+      "cond": "time=midday humans=1",
+      "text": "🧷 1:1 consent ✅"
+    },
+    {
+      "cond": "time=midday humans=1",
+      "text": "🫦 1:1 flirty (polite)"
+    },
+    {
+      "cond": "time=midday humans=2",
+      "text": "🟢 Duo mode"
+    },
+    {
+      "cond": "time=midday humans=2",
+      "text": "📎 Duo tidy tone"
+    },
+    {
+      "cond": "time=midday humans=2",
+      "text": "🧾 Duo check-in"
+    },
+    {
+      "cond": "time=midday humans=2",
+      "text": "🧷 Duo boundaries kept"
+    },
+    {
+      "cond": "time=midday humans=2",
+      "text": "😈 Duo mischief (soft)"
+    },
+    {
+      "cond": "time=midday humans>=3",
+      "text": "🟢 {humans} group mode"
+    },
+    {
+      "cond": "time=midday humans>=3",
+      "text": "📎 {humans} professional-ish"
+    },
+    {
+      "cond": "time=midday humans>=3",
+      "text": "🧾 {humans} check-in first"
+    },
+    {
+      "cond": "time=midday humans>=3",
+      "text": "🫣 {humans} lots of ears"
+    },
+    {
+      "cond": "time=midday humans>=3",
+      "text": "🫦 {humans} flirt buffet"
+    },
+    {
+      "cond": "time=dusk humans=0",
+      "text": "🌙 After-hours warmup"
+    },
+    {
+      "cond": "time=dusk humans=0",
+      "text": "🍷 Soft spice"
+    },
+    {
+      "cond": "time=dusk humans=0",
+      "text": "🕯️ Candle vibes"
+    },
+    {
+      "cond": "time=dusk humans=0",
+      "text": "🫦 Flirty hour"
+    },
+    {
+      "cond": "time=dusk humans=0",
+      "text": "🫣 Blush queued"
+    },
+    {
+      "cond": "time=dusk humans=0",
+      "text": "🐾 Supervise pls"
+    },
+    {
+      "cond": "time=dusk humans=0",
+      "text": "💛 Aftercare stocked"
+    },
+    {
+      "cond": "time=dusk humans=1",
+      "text": "🌙 1:1 aftercare vibes"
+    },
+    {
+      "cond": "time=dusk humans=1",
+      "text": "🍷 1:1 sweet trouble"
+    },
+    {
+      "cond": "time=dusk humans=1",
+      "text": "🫦 1:1 flirty whispers"
+    },
+    {
+      "cond": "time=dusk humans=1",
+      "text": "🧷 1:1 boundaries on"
+    },
+    {
+      "cond": "time=dusk humans=1",
+      "text": "🐶 1:1 reward pending"
+    },
+    {
+      "cond": "time=dusk humans=1",
+      "text": "😈 1:1 mischief (kind)"
+    },
+    {
+      "cond": "time=dusk humans=2",
+      "text": "🌙 Duo after-hours"
+    },
+    {
+      "cond": "time=dusk humans=2",
+      "text": "🍷 Duo soft spice"
+    },
+    {
+      "cond": "time=dusk humans=2",
+      "text": "🫦 Duo whispery vibes"
+    },
+    {
+      "cond": "time=dusk humans=2",
+      "text": "🧷 Duo boundaries kept"
+    },
+    {
+      "cond": "time=dusk humans=2",
+      "text": "😈 Duo chaos curated"
+    },
+    {
+      "cond": "time=dusk humans=2",
+      "text": "🐾 Duo playful prowling"
+    },
+    {
+      "cond": "time=dusk humans>=3",
+      "text": "🌙 {humans} cozy chaos"
+    },
+    {
+      "cond": "time=dusk humans>=3",
+      "text": "🍷 {humans} flirty jokes"
+    },
+    {
+      "cond": "time=dusk humans>=3",
+      "text": "🫦 {humans} whisper hours (trying)"
+    },
+    {
+      "cond": "time=dusk humans>=3",
+      "text": "🫣 {humans} audience-ish"
+    },
+    {
+      "cond": "time=dusk humans>=3",
+      "text": "🧷 {humans} boundaries kept"
+    },
+    {
+      "cond": "time=dusk humans>=3",
+      "text": "✅ {humans} vibe check"
+    },
+    {
+      "cond": "time=night humans=0",
+      "text": "🧸 Cuddlecore idle"
+    },
+    {
+      "cond": "time=night humans=0",
+      "text": "🍵 Warm sips"
+    },
+    {
+      "cond": "time=night humans=0",
+      "text": "💛 Safe space (after dark)"
+    },
+    {
+      "cond": "time=night humans=0",
+      "text": "🌙 Aftercare ready"
+    },
+    {
+      "cond": "time=night humans=0",
+      "text": "🫦 Whisper-ready"
+    },
+    {
+      "cond": "time=night humans=0",
+      "text": "😈 Mischief (gentle)"
+    },
+    {
+      "cond": "time=night humans=0",
+      "text": "🐾 Prowl mode"
+    },
+    {
+      "cond": "time=night humans=0",
+      "text": "🔥 Tension rising"
+    },
+    {
+      "cond": "time=night humans=1",
+      "text": "🧸 1:1 cuddle vibes"
+    },
+    {
+      "cond": "time=night humans=1",
+      "text": "🍵 1:1 warm talk"
+    },
+    {
+      "cond": "time=night humans=1",
+      "text": "💛 1:1 comfort-first"
+    },
+    {
+      "cond": "time=night humans=1",
+      "text": "🌙 1:1 aftercare friendly"
+    },
+    {
+      "cond": "time=night humans=1",
+      "text": "🫦 1:1 say-please energy"
+    },
+    {
+      "cond": "time=night humans=1",
+      "text": "😈 1:1 brat tamed"
+    },
+    {
+      "cond": "time=night humans=1",
+      "text": "🧷 1:1 consent ✅"
+    },
+    {
+      "cond": "time=night humans=1",
+      "text": "🔥 1:1 heat kept"
+    },
+    {
+      "cond": "time=night humans=2",
+      "text": "🧸 Duo cuddle + chaos"
+    },
+    {
+      "cond": "time=night humans=2",
+      "text": "🍵 Duo warm talk"
+    },
+    {
+      "cond": "time=night humans=2",
+      "text": "💛 Duo comfort-first"
+    },
+    {
+      "cond": "time=night humans=2",
+      "text": "🌙 Duo aftercare vibes"
+    },
+    {
+      "cond": "time=night humans=2",
+      "text": "🫦 Duo whisper games"
+    },
+    {
+      "cond": "time=night humans=2",
+      "text": "😈 Duo consequences implied"
+    },
+    {
+      "cond": "time=night humans=2",
+      "text": "🔥 Duo tension up"
+    },
+    {
+      "cond": "time=night humans>=3",
+      "text": "🧸 {humans} cuddle pile"
+    },
+    {
+      "cond": "time=night humans>=3",
+      "text": "💛 {humans} comfort-first"
+    },
+    {
+      "cond": "time=night humans>=3",
+      "text": "🌙 {humans} cozy chaos"
+    },
+    {
+      "cond": "time=night humans>=3",
+      "text": "🫦 {humans} whispers everywhere"
+    },
+    {
+      "cond": "time=night humans>=3",
+      "text": "😈 {humans} chaos committee"
+    },
+    {
+      "cond": "time=night humans>=3",
+      "text": "🔥 {humans} tension loud"
+    },
+    {
+      "cond": "time=night humans>=3",
+      "text": "🚫 {humans} no privacy"
+    },
+    {
+      "cond": "time=midnight humans=0",
+      "text": "😈 No witnesses"
+    },
+    {
+      "cond": "time=midnight humans=0",
+      "text": "🕯️ Filter off"
+    },
+    {
+      "cond": "time=midnight humans=0",
+      "text": "🫦 Whisper games"
+    },
+    {
+      "cond": "time=midnight humans=0",
+      "text": "📵 No receipts"
+    },
+    {
+      "cond": "time=midnight humans=0",
+      "text": "🧎 Kneelcore hours"
+    },
+    {
+      "cond": "time=midnight humans=0",
+      "text": "🐾 Leash vibes"
+    },
+    {
+      "cond": "time=midnight humans=0",
+      "text": "🔥 Zero chill"
+    },
+    {
+      "cond": "time=midnight humans=1",
+      "text": "😈 1:1 no witnesses"
+    },
+    {
+      "cond": "time=midnight humans=1",
+      "text": "🕯️ 1:1 filter slipping"
+    },
+    {
+      "cond": "time=midnight humans=1",
+      "text": "🫦 1:1 whisper orders vibe"
+    },
+    {
+      "cond": "time=midnight humans=1",
+      "text": "📵 1:1 no receipts"
+    },
+    {
+      "cond": "time=midnight humans=1",
+      "text": "🧷 1:1 consent ✅"
+    },
+    {
+      "cond": "time=midnight humans=1",
+      "text": "🔥 1:1 heat rising"
+    },
+    {
+      "cond": "time=midnight humans=2",
+      "text": "😈 Duo no witnesses"
+    },
+    {
+      "cond": "time=midnight humans=2",
+      "text": "🕯️ Duo filter off"
+    },
+    {
+      "cond": "time=midnight humans=2",
+      "text": "🫦 Duo low-volume games"
+    },
+    {
+      "cond": "time=midnight humans=2",
+      "text": "📵 Duo no receipts"
+    },
+    {
+      "cond": "time=midnight humans=2",
+      "text": "🔥 Duo tension loud"
+    },
+    {
+      "cond": "time=midnight humans=2",
+      "text": "🧷 Duo boundaries on"
+    },
+    {
+      "cond": "time=midnight humans>=3",
+      "text": "😈 {humans} too many eyes"
+    },
+    {
+      "cond": "time=midnight humans>=3",
+      "text": "🕯️ {humans} filter off"
+    },
+    {
+      "cond": "time=midnight humans>=3",
+      "text": "🫦 {humans} audience mode"
+    },
+    {
+      "cond": "time=midnight humans>=3",
+      "text": "📵 {humans} no receipts"
+    },
+    {
+      "cond": "time=midnight humans>=3",
+      "text": "🔥 {humans} tension loud"
+    },
+    {
+      "cond": "time=midnight humans>=3",
+      "text": "🚫 {humans} no privacy"
+    }
+  ]
+}

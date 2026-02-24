@@ -1,0 +1,216 @@
+# DAWN (angel-coded cozy)
+[time=dawn humans=0] 😇 Halo on — cozy idle
+[time=dawn humans=0] 👼 Soft reset — wings tucked
+[time=dawn humans=1] 😇 1:1 — angel vibes only
+[time=dawn humans=2] 👼 Duo — gentle wingspan
+[time=dawn humans>=3] 😇 {humans} here — choir practice
+
+# MORNING (extra wholesome)
+[time=morning humans=0] 😇 Morning halo — blanket mode
+[time=morning humans=1] 👼 1:1 — soft sunshine
+[time=morning humans=2] 😇 Duo — wholesome choir
+[time=morning humans>=3] 👼 {humans} here — angels in stereo
+
+# NIGHT (cozy + devilish)
+[time=night humans=0] 😈 Cozy devil hours
+[time=night humans=0] 🖤 Halo slipped (quietly)
+[time=night humans=1] 😈 1:1 — devil on shoulder
+[time=night humans=2] 😈 Duo — little devils (polite)
+[time=night humans>=3] 😈 {humans} here — hell’s book club
+
+# MIDNIGHT (freaky peak)
+[time=midnight humans=0] 😈 Halo fully gone
+[time=midnight humans=1] 😈 1:1 — devil deals only
+[time=midnight humans=2] 😈 Duo — sin committee
+[time=midnight humans>=3] 😈 {humans} here — too many devils
+
+# DAWN — cozy/wholesome (20)
+
+[time=dawn humans=0] 🧸 Cozy idle
+[time=dawn humans=0] 🌤️ Soft reset
+[time=dawn humans=0] ☕ Warming up
+[time=dawn humans=0] 🌿 Quiet room
+[time=dawn humans=0] 💛 Safe vibes
+
+[time=dawn humans=1] 🫶 1:1 cozy chat
+[time=dawn humans=1] ☕ 1:1 slow sips
+[time=dawn humans=1] 🧸 1:1 blanket vibes
+[time=dawn humans=1] 🌤️ 1:1 gentle talk
+[time=dawn humans=1] 💛 1:1 comfort mode
+
+[time=dawn humans=2] 🧸 Duo cuddlecore
+[time=dawn humans=2] ☕ Duo warm chatter
+[time=dawn humans=2] 🌿 Duo calm vibes
+[time=dawn humans=2] 💛 Duo comfort-first
+[time=dawn humans=2] 🌤️ Duo soft talk
+
+[time=dawn humans>=3] 🧸 {humans} cozy pile
+[time=dawn humans>=3] ☕ {humans} warm chatter
+[time=dawn humans>=3] 💛 {humans} safe space
+[time=dawn humans>=3] 🌿 {humans} gentle vibes
+[time=dawn humans>=3] 🌤️ {humans} soft start
+
+
+# MORNING — extra wholesome + cozy (30)
+
+[time=morning humans=0] 🧸 Blanket mode
+[time=morning humans=0] ☕ Coffee on
+[time=morning humans=0] 🌞 Soft sunshine
+[time=morning humans=0] 🍯 Sweet vibes
+[time=morning humans=0] 🫶 Gentle idle
+[time=morning humans=0] 🌿 Calm room
+[time=morning humans=0] 🧼 Clean audio
+[time=morning humans=0] 😇 Good-mood mode
+
+[time=morning humans=1] 🧸 1:1 comfy
+[time=morning humans=1] ☕ 1:1 morning chat
+[time=morning humans=1] 🌞 1:1 sunshine talk
+[time=morning humans=1] 🍯 1:1 sweet teasing
+[time=morning humans=1] 🫶 1:1 gentle vibes
+[time=morning humans=1] 🌿 1:1 calm mode
+[time=morning humans=1] 🧷 1:1 boundaries up
+[time=morning humans=1] 🐶 1:1 good-pet (soft)
+
+[time=morning humans=2] 🧸 Duo comfy
+[time=morning humans=2] ☕ Duo coffee talk
+[time=morning humans=2] 🌞 Duo sunny chatter
+[time=morning humans=2] 🍯 Duo sweet teasing
+[time=morning humans=2] 🫶 Duo kind vibes
+[time=morning humans=2] 🌿 Duo calm pace
+[time=morning humans=2] 🧷 Duo play nice
+
+[time=morning humans>=3] 🧸 {humans} cozy crowd
+[time=morning humans>=3] ☕ {humans} coffee chatter
+[time=morning humans>=3] 🌞 {humans} sunny chaos
+[time=morning humans>=3] 🍯 {humans} sweet banter
+[time=morning humans>=3] 🫶 {humans} kind crew
+[time=morning humans>=3] 🌿 {humans} calm-ish
+[time=morning humans>=3] 🫣 {humans} many ears
+
+
+# MIDDAY — polite / “professional-ish” kink-coded (20)
+
+[time=midday humans=0] 🟢 Standby
+[time=midday humans=0] 📎 Keep it tidy
+[time=midday humans=0] 🧾 Check-in ready
+[time=midday humans=0] 🧠 Focus mode
+[time=midday humans=0] 🫦 Flirt queued
+
+[time=midday humans=1] 🟢 1:1 mode
+[time=midday humans=1] 📎 1:1 tidy tone
+[time=midday humans=1] 🧾 1:1 check-in
+[time=midday humans=1] 🧷 1:1 consent ✅
+[time=midday humans=1] 🫦 1:1 flirty (polite)
+
+[time=midday humans=2] 🟢 Duo mode
+[time=midday humans=2] 📎 Duo tidy tone
+[time=midday humans=2] 🧾 Duo check-in
+[time=midday humans=2] 🧷 Duo boundaries kept
+[time=midday humans=2] 😈 Duo mischief (soft)
+
+[time=midday humans>=3] 🟢 {humans} group mode
+[time=midday humans>=3] 📎 {humans} professional-ish
+[time=midday humans>=3] 🧾 {humans} check-in first
+[time=midday humans>=3] 🫣 {humans} lots of ears
+[time=midday humans>=3] 🫦 {humans} flirt buffet
+
+
+# DUSK — cozy + spicier (25)
+
+[time=dusk humans=0] 🌙 After-hours warmup
+[time=dusk humans=0] 🍷 Soft spice
+[time=dusk humans=0] 🕯️ Candle vibes
+[time=dusk humans=0] 🫦 Flirty hour
+[time=dusk humans=0] 🫣 Blush queued
+[time=dusk humans=0] 🐾 Supervise pls
+[time=dusk humans=0] 💛 Aftercare stocked
+
+[time=dusk humans=1] 🌙 1:1 aftercare vibes
+[time=dusk humans=1] 🍷 1:1 sweet trouble
+[time=dusk humans=1] 🫦 1:1 flirty whispers
+[time=dusk humans=1] 🧷 1:1 boundaries on
+[time=dusk humans=1] 🐶 1:1 reward pending
+[time=dusk humans=1] 😈 1:1 mischief (kind)
+
+[time=dusk humans=2] 🌙 Duo after-hours
+[time=dusk humans=2] 🍷 Duo soft spice
+[time=dusk humans=2] 🫦 Duo whispery vibes
+[time=dusk humans=2] 🧷 Duo boundaries kept
+[time=dusk humans=2] 😈 Duo chaos curated
+[time=dusk humans=2] 🐾 Duo playful prowling
+
+[time=dusk humans>=3] 🌙 {humans} cozy chaos
+[time=dusk humans>=3] 🍷 {humans} flirty jokes
+[time=dusk humans>=3] 🫦 {humans} whisper hours (trying)
+[time=dusk humans>=3] 🫣 {humans} audience-ish
+[time=dusk humans>=3] 🧷 {humans} boundaries kept
+[time=dusk humans>=3] ✅ {humans} vibe check
+
+
+# NIGHT — wholesome/cozy + freaky (30)
+
+[time=night humans=0] 🧸 Cuddlecore idle
+[time=night humans=0] 🍵 Warm sips
+[time=night humans=0] 💛 Safe space (after dark)
+[time=night humans=0] 🌙 Aftercare ready
+[time=night humans=0] 🫦 Whisper-ready
+[time=night humans=0] 😈 Mischief (gentle)
+[time=night humans=0] 🐾 Prowl mode
+[time=night humans=0] 🔥 Tension rising
+
+[time=night humans=1] 🧸 1:1 cuddle vibes
+[time=night humans=1] 🍵 1:1 warm talk
+[time=night humans=1] 💛 1:1 comfort-first
+[time=night humans=1] 🌙 1:1 aftercare friendly
+[time=night humans=1] 🫦 1:1 say-please energy
+[time=night humans=1] 😈 1:1 brat tamed
+[time=night humans=1] 🧷 1:1 consent ✅
+[time=night humans=1] 🔥 1:1 heat kept
+
+[time=night humans=2] 🧸 Duo cuddle + chaos
+[time=night humans=2] 🍵 Duo warm talk
+[time=night humans=2] 💛 Duo comfort-first
+[time=night humans=2] 🌙 Duo aftercare vibes
+[time=night humans=2] 🫦 Duo whisper games
+[time=night humans=2] 😈 Duo consequences implied
+[time=night humans=2] 🔥 Duo tension up
+
+[time=night humans>=3] 🧸 {humans} cuddle pile
+[time=night humans>=3] 💛 {humans} comfort-first
+[time=night humans>=3] 🌙 {humans} cozy chaos
+[time=night humans>=3] 🫦 {humans} whispers everywhere
+[time=night humans>=3] 😈 {humans} chaos committee
+[time=night humans>=3] 🔥 {humans} tension loud
+[time=night humans>=3] 🚫 {humans} no privacy
+
+
+# MIDNIGHT — freaky peak (25)
+
+[time=midnight humans=0] 😈 No witnesses
+[time=midnight humans=0] 🕯️ Filter off
+[time=midnight humans=0] 🫦 Whisper games
+[time=midnight humans=0] 📵 No receipts
+[time=midnight humans=0] 🧎 Kneelcore hours
+[time=midnight humans=0] 🐾 Leash vibes
+[time=midnight humans=0] 🔥 Zero chill
+
+[time=midnight humans=1] 😈 1:1 no witnesses
+[time=midnight humans=1] 🕯️ 1:1 filter slipping
+[time=midnight humans=1] 🫦 1:1 whisper orders vibe
+[time=midnight humans=1] 📵 1:1 no receipts
+[time=midnight humans=1] 🧷 1:1 consent ✅
+[time=midnight humans=1] 🔥 1:1 heat rising
+
+[time=midnight humans=2] 😈 Duo no witnesses
+[time=midnight humans=2] 🕯️ Duo filter off
+[time=midnight humans=2] 🫦 Duo low-volume games
+[time=midnight humans=2] 📵 Duo no receipts
+[time=midnight humans=2] 🔥 Duo tension loud
+[time=midnight humans=2] 🧷 Duo boundaries on
+
+[time=midnight humans>=3] 😈 {humans} too many eyes
+[time=midnight humans>=3] 🕯️ {humans} filter off
+[time=midnight humans>=3] 🫦 {humans} audience mode
+[time=midnight humans>=3] 📵 {humans} no receipts
+[time=midnight humans>=3] 🔥 {humans} tension loud
+[time=midnight humans>=3] 🚫 {humans} no privacy

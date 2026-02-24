@@ -1,0 +1,867 @@
+require("dotenv").config();
+
+const fs = require("fs");
+const path = require("path");
+const crypto = require("crypto");
+const {
+  Client,
+  GatewayIntentBits,
+  ChannelType,
+  PermissionFlagsBits,
+  ActivityType,
+  Events,
+} = require("discord.js");
+const { joinVoiceChannel, getVoiceConnection } = require("@discordjs/voice");
+
+const TOKEN = process.env.DISCORD_TOKEN;
+const CLIENT_ID = process.env.CLIENT_ID;
+const GUILD_ID = process.env.GUILD_ID;
+const VOICE_CHANNEL_ID = process.env.VOICE_CHANNEL_ID;
+
+const LEAVE_DELAY_MS = Number(process.env.LEAVE_DELAY_MS ?? 15000);
+
+// Prevent spam to the VC status endpoint
+const VC_STATUS_MIN_INTERVAL_MS = Number(process.env.VC_STATUS_MIN_INTERVAL_MS ?? 15000);
+const VC_STATUS_MIN_INTERVAL_ON_CHANGE_MS = Number(
+  process.env.VC_STATUS_MIN_INTERVAL_ON_CHANGE_MS ?? 750
+);
+
+// OPTIONAL: rotate status while humans=0
+const VC_IDLE_ROTATE_MS = Number(process.env.VC_IDLE_ROTATE_MS ?? 10 * 60_000);
+
+// OPTIONAL: rotate status even when humans>0 (set to 0 to disable)
+const VC_ROTATE_MS = Number(process.env.VC_ROTATE_MS ?? 0);
+
+// Optional debug logs
+const DEBUG = String(process.env.DEBUG_STATUS ?? "").toLowerCase() === "1";
+
+// Watchlist: if any of these user IDs are in the voice channel, we can show them in the VC status
+const VC_WATCH_USER_IDS = new Set(
+  String(process.env.VC_WATCH_USER_IDS ?? "")
+    .split(/[, ]+/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+);
+
+// Optional: prefix emoji/text when appending watch users
+const VC_WATCH_PREFIX = String(process.env.VC_WATCH_PREFIX ?? "👀");
+
+// How to inject watch users into the status:
+// - "auto": append only if the chosen template doesn't already reference {watch}/{watchers}/{watchcount}
+// - "always": always append
+// - "never": never auto-append
+const VC_WATCH_APPEND_MODE = String(process.env.VC_WATCH_APPEND_MODE ?? "auto").toLowerCase();
+
+// Status file names (JSON)
+const VC_STATUS_FILE = String(process.env.VC_STATUS_FILE ?? "vc_statuses.json");
+const BOT_STATUS_FILE = String(process.env.BOT_STATUS_FILE ?? "bot_statuses.json");
+
+if (!TOKEN || !CLIENT_ID || !GUILD_ID || !VOICE_CHANNEL_ID) {
+  console.error("Missing env vars. Need DISCORD_TOKEN, CLIENT_ID, GUILD_ID, VOICE_CHANNEL_ID");
+  process.exit(1);
+}
+
+const client = new Client({
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates],
+});
+
+// -------------------- Persistent runtime config --------------------
+const RUNTIME_CONFIG_FILE = path.join(__dirname, "runtime_config.json");
+
+let runtimeConfig = {
+  autoStatusEnabled: true,
+  manualStatus: null, // only used when autoStatusEnabled === false
+};
+
+function loadRuntimeConfig() {
+  try {
+    const raw = fs.readFileSync(RUNTIME_CONFIG_FILE, "utf8");
+    const parsed = JSON.parse(raw);
+    runtimeConfig.autoStatusEnabled =
+      typeof parsed.autoStatusEnabled === "boolean" ? parsed.autoStatusEnabled : true;
+    runtimeConfig.manualStatus =
+      typeof parsed.manualStatus === "string" || parsed.manualStatus === null
+        ? parsed.manualStatus
+        : null;
+
+    console.log(
+      `✅ Loaded runtime_config.json: auto=${runtimeConfig.autoStatusEnabled}, manual=${
+        runtimeConfig.manualStatus ? "set" : "none"
+      }`
+    );
+  } catch {
+    // defaults
+  }
+}
+
+function saveRuntimeConfig() {
+  try {
+    fs.writeFileSync(RUNTIME_CONFIG_FILE, JSON.stringify(runtimeConfig, null, 2));
+  } catch (e) {
+    console.warn("⚠️ Failed to save runtime_config.json:", e?.message || e);
+  }
+}
+
+// -------------------- Time buckets --------------------
+const TIMEZONE = "Australia/Sydney";
+const NAMED_WINDOWS = {
+  midnight: { start: "00:00", end: "04:00" },
+  dawn: { start: "04:00", end: "08:00" },
+  morning: { start: "08:00", end: "12:00" },
+  midday: { start: "12:00", end: "16:00" },
+  dusk: { start: "16:00", end: "20:00" },
+  night: { start: "20:00", end: "00:00" }, // wraps
+};
+
+function hhmmToMin(hhmm) {
+  const [h, m] = String(hhmm).split(":").map((x) => parseInt(x, 10));
+  return h * 60 + m;
+}
+
+function inWindow(nowMin, startMin, endMin) {
+  if (startMin <= endMin) return nowMin >= startMin && nowMin < endMin;
+  return nowMin >= startMin || nowMin < endMin;
+}
+
+function getLocalNow() {
+  const now = new Date();
+  const hhmm = new Intl.DateTimeFormat("en-GB", {
+    timeZone: TIMEZONE,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(now);
+  const nowMin = hhmmToMin(hhmm);
+  return { hhmm, nowMin };
+}
+
+function currentTimeBucket(nowMin) {
+  for (const [name, w] of Object.entries(NAMED_WINDOWS)) {
+    if (inWindow(nowMin, hhmmToMin(w.start), hhmmToMin(w.end))) return name;
+  }
+  return "night";
+}
+
+function computeState(humans) {
+  if (humans === 0) return "empty";
+  if (humans === 1) return "solo";
+  return "crowded";
+}
+
+// -------------------- Voice state cache --------------------
+function formatNameList(names, maxItems = 3) {
+  if (!Array.isArray(names) || names.length === 0) return "";
+  const shown = names.slice(0, maxItems);
+  const extra = names.length - shown.length;
+  return extra > 0 ? `${shown.join(", ")} +${extra}` : shown.join(", ");
+}
+
+function getHumanCountAndSoloNameFromChannel(channel) {
+  const members = channel?.members;
+  if (!members) return { humansCount: 0, soloUserName: null, watchNames: [], watchIds: [] };
+
+  const humans = members.filter((m) => m?.user && !m.user.bot);
+
+  // Watch users that are present in the channel (matched by user ID)
+  const watchMap = new Map();
+  if (VC_WATCH_USER_IDS.size) {
+    for (const m of humans.values()) {
+      if (VC_WATCH_USER_IDS.has(m.id)) {
+        const name = m.displayName ?? m.user?.username ?? m.id;
+        watchMap.set(m.id, name);
+      }
+    }
+  }
+
+  const watchIds = Array.from(watchMap.keys()).sort();
+  const watchNames = watchIds.map((id) => watchMap.get(id)).filter(Boolean);
+
+  return {
+    humansCount: humans.size,
+    soloUserName: humans.size === 1 ? humans.first()?.displayName ?? null : null,
+    watchNames,
+    watchIds,
+  };
+}
+
+// -------------------- Re-entry counters (reroll on 2->3->2) --------------------
+const entryCounts = new Map(); // key -> number
+const sessionByGuild = new Map(); // guildId -> { vcFp, vcEntry, botFp, botEntry }
+
+function bumpEntry(prefix, guildId, fp) {
+  const k = `${prefix}|${guildId}|${fp}`;
+  const n = (entryCounts.get(k) ?? 0) + 1;
+  entryCounts.set(k, n);
+  return n;
+}
+
+function getSession(guildId) {
+  let s = sessionByGuild.get(guildId);
+  if (!s) {
+    s = { vcFp: null, vcEntry: 0, botFp: null, botEntry: 0 };
+    sessionByGuild.set(guildId, s);
+  }
+  return s;
+}
+
+// -------------------- Status engine (JSON) --------------------
+function parseCondToken(token) {
+  const ops = [">=", "<=", "="];
+  for (const op of ops) {
+    const idx = token.indexOf(op);
+    if (idx > 0) {
+      const key = token.slice(0, idx).trim().toLowerCase();
+      const val = token.slice(idx + op.length).trim();
+      return { key, op, val };
+    }
+  }
+  return null;
+}
+
+function parseBetweenRange(val) {
+  const m = String(val).match(/^(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})$/);
+  if (!m) return null;
+  return { startMin: hhmmToMin(m[1]), endMin: hhmmToMin(m[2]) };
+}
+
+function makeStatusEngine(filename) {
+  const filePath = path.join(__dirname, filename);
+
+  let pools = { any: [], empty: [], solo: [], crowded: [], connected: [] };
+  let rules = []; // { conds, text }
+
+  // Sticky random: cache the index per stableKey so it doesn't change constantly
+  const choiceCache = new Map(); // cacheKey -> idx
+
+  function randInt(max) {
+    return crypto.randomInt(0, max);
+  }
+
+  function chooseIdx(cacheKey, len) {
+    if (!len || len <= 1) return 0;
+
+    const existing = choiceCache.get(cacheKey);
+    if (typeof existing === "number" && existing >= 0 && existing < len) return existing;
+
+    const idx = randInt(len);
+    choiceCache.set(cacheKey, idx);
+    return idx;
+  }
+
+  function buildCondsFromCondString(condStr) {
+    const tokens = String(condStr || "")
+      .split(/\s+/)
+      .map((t) => t.trim())
+      .filter(Boolean);
+
+    const conds = {};
+    for (const t of tokens) {
+      const parsed = parseCondToken(t);
+      if (!parsed) continue;
+      const { key, op, val } = parsed;
+      conds[key] = conds[key] || [];
+      conds[key].push({ op, val });
+    }
+    return conds;
+  }
+
+  function buildCondsFromWhen(whenObj) {
+    const conds = {};
+    if (!whenObj || typeof whenObj !== "object" || Array.isArray(whenObj)) return conds;
+
+    for (const [rawKey, rawVal] of Object.entries(whenObj)) {
+      const key = String(rawKey).toLowerCase();
+
+      // { "humans": { ">=": 2 } }
+      if (rawVal && typeof rawVal === "object" && !Array.isArray(rawVal)) {
+        for (const [op, v] of Object.entries(rawVal)) {
+          const opNorm = String(op).trim();
+          conds[key] = conds[key] || [];
+          conds[key].push({ op: opNorm, val: String(v) });
+        }
+        continue;
+      }
+
+      // primitive -> "="
+      conds[key] = conds[key] || [];
+      conds[key].push({ op: "=", val: String(rawVal) });
+    }
+
+    return conds;
+  }
+
+  function parseFromJson(text) {
+    const obj = JSON.parse(text);
+
+    const p = { any: [], empty: [], solo: [], crowded: [], connected: [] };
+    const srcPools = obj?.pools && typeof obj.pools === "object" ? obj.pools : {};
+
+    for (const k of Object.keys(p)) {
+      if (Array.isArray(srcPools[k])) p[k] = srcPools[k].map((x) => String(x));
+    }
+
+    const r = [];
+    if (Array.isArray(obj?.rules)) {
+      for (const rule of obj.rules) {
+        if (!rule || typeof rule !== "object") continue;
+        const textVal = rule.text ?? rule.template ?? rule.value;
+        if (typeof textVal !== "string" || !textVal.trim()) continue;
+
+        let conds = {};
+        if (typeof rule.cond === "string" && rule.cond.trim()) {
+          conds = buildCondsFromCondString(rule.cond);
+        } else if (rule.when) {
+          conds = buildCondsFromWhen(rule.when);
+        } else {
+          // no conditions -> treat as "any pool"
+          p.any.push(textVal.trim());
+          continue;
+        }
+
+        r.push({ conds, text: textVal.trim() });
+      }
+    }
+
+    return { p, r };
+  }
+
+  function load() {
+    try {
+      const text = fs.readFileSync(filePath, "utf8");
+      const ext = path.extname(filePath).toLowerCase();
+
+      let parsed;
+      if (ext === ".json") {
+        parsed = parseFromJson(text);
+      } else {
+        throw new Error(`Expected .json status file, got: ${ext || "(no extension)"}`);
+      }
+
+      const { p, r } = parsed;
+
+      const poolTotal =
+        p.any.length + p.empty.length + p.solo.length + p.crowded.length + p.connected.length;
+
+      if (poolTotal > 0) pools = p;
+      rules = r;
+
+      choiceCache.clear(); // file changed => allow new picks
+      console.log(
+        `✅ Loaded ${filename}: rules=${rules.length} pools.any=${pools.any.length} (json)`
+      );
+    } catch (e) {
+      console.warn(`⚠️ Could not read ${filename}: ${e.message}`);
+    }
+  }
+
+  function watch() {
+    try {
+      fs.watch(filePath, { persistent: false }, () => setTimeout(load, 200));
+    } catch (e) {
+      console.warn(`⚠️ fs.watch failed for ${filename}: ${e.message}`);
+    }
+  }
+
+  function condMatches(conds, ctx) {
+    const { nowMin } = getLocalNow();
+    const timeBucket = currentTimeBucket(nowMin);
+
+    for (const [key, checks] of Object.entries(conds)) {
+      for (const c of checks) {
+        const { op, val } = c;
+
+        if (key === "time") {
+          if (op !== "=") return false;
+          if (timeBucket !== String(val).toLowerCase()) return false;
+          continue;
+        }
+
+        // Optional: exact time window, e.g. between=06:00-10:00
+        if (key === "between") {
+          if (op !== "=") return false;
+          const range = parseBetweenRange(val);
+          if (!range) return false;
+          if (!inWindow(nowMin, range.startMin, range.endMin)) return false;
+          continue;
+        }
+
+        if (key === "humans") {
+          const n = ctx.humans;
+          const x = parseInt(val, 10);
+          if (Number.isNaN(x)) return false;
+          if (op === "=" && n !== x) return false;
+          if (op === ">=" && n < x) return false;
+          if (op === "<=" && n > x) return false;
+          continue;
+        }
+
+        if (key === "connected") {
+          if (op !== "=") return false;
+          const want = String(val).toLowerCase() === "true";
+          if (ctx.connected !== want) return false;
+          continue;
+        }
+
+        if (key === "state") {
+          if (op !== "=") return false;
+          if (ctx.state !== String(val).toLowerCase()) return false;
+          continue;
+        }
+
+        if (key === "auto") {
+          if (op !== "=") return false;
+          const want = String(val).toLowerCase() === "true";
+          if (ctx.auto !== want) return false;
+          continue;
+        }
+
+        if (key === "vcauto") {
+          if (op !== "=") return false;
+          const want = String(val).toLowerCase() === "true";
+          if (ctx.vcauto !== want) return false;
+          continue;
+        }
+
+        if (key === "leaving") {
+          if (op !== "=") return false;
+          const want = String(val).toLowerCase() === "true";
+          if (ctx.leaving !== want) return false;
+          continue;
+        }
+      }
+    }
+    return true;
+  }
+
+  function pick(ctx, fallbackText, stableKey = "default") {
+    const matches = rules.filter((r) => condMatches(r.conds, ctx));
+    let template = null;
+
+    if (matches.length) {
+      // prefer most specific
+      matches.sort((a, b) => Object.keys(b.conds).length - Object.keys(a.conds).length);
+      const bestK = Object.keys(matches[0].conds).length;
+      const best = matches.filter((r) => Object.keys(r.conds).length === bestK);
+
+      const cacheKey = `${filename}|rules|${stableKey}|len=${best.length}`;
+      const idx = chooseIdx(cacheKey, best.length);
+      template = best[idx].text;
+
+      if (DEBUG) console.log(`🎲 ${filename} best=${best.length} idx=${idx} key=${stableKey}`);
+    } else {
+      const k = ctx.connected ? "connected" : pools[ctx.state]?.length ? ctx.state : "any";
+      const pool = pools[k]?.length ? pools[k] : pools.any;
+
+      if (pool?.length) {
+        const cacheKey = `${filename}|pool|${stableKey}|k=${k}|len=${pool.length}`;
+        const idx = chooseIdx(cacheKey, pool.length);
+        template = pool[idx];
+      }
+    }
+
+    return template || fallbackText;
+  }
+
+  return { load, watch, pick };
+}
+
+const vcEngine = makeStatusEngine(VC_STATUS_FILE);
+const botEngine = makeStatusEngine(BOT_STATUS_FILE);
+
+// -------------------- Voice channel status API --------------------
+let lastVcStatus = "";
+let lastVcStatusAt = 0;
+let lastVcKey = "";
+
+async function setVoiceChannelStatus(text, key, { force = false } = {}) {
+  const now = Date.now();
+  if (text === lastVcStatus && key === lastVcKey) return;
+
+  if (!force) {
+    const sameKey = key === lastVcKey;
+    const minInterval = sameKey ? VC_STATUS_MIN_INTERVAL_MS : VC_STATUS_MIN_INTERVAL_ON_CHANGE_MS;
+    if (now - lastVcStatusAt < minInterval) return;
+  }
+
+  try {
+    await client.rest.put(`/channels/${VOICE_CHANNEL_ID}/voice-status`, {
+      body: { status: String(text ?? "").slice(0, 500) },
+    });
+    lastVcStatus = text;
+    lastVcKey = key;
+    lastVcStatusAt = now;
+  } catch (e) {
+    console.warn("⚠️ Failed to set voice channel status:", e?.rawError?.message || e?.message || e);
+  }
+}
+
+// -------------------- Bot presence --------------------
+let lastPresence = "";
+let lastPresenceKey = "";
+let lastPresenceAt = 0;
+
+function setBotPresence(text, key) {
+  const now = Date.now();
+  if (key === lastPresenceKey && now - lastPresenceAt < 15000) return;
+
+  const clipped = String(text ?? "").slice(0, 120);
+  if (!clipped) return;
+
+  if (clipped === lastPresence && key === lastPresenceKey) return;
+
+  client.user.setPresence({
+    status: "online",
+    activities: [{ type: ActivityType.Custom, name: "Custom Status", state: clipped }],
+  });
+
+  lastPresence = clipped;
+  lastPresenceKey = key;
+  lastPresenceAt = now;
+}
+
+// -------------------- Leave delay timers --------------------
+const leaveTimers = new Map(); // guildId -> Timeout
+
+function cancelLeaveTimer(guildId) {
+  const t = leaveTimers.get(guildId);
+  if (t) clearTimeout(t);
+  leaveTimers.delete(guildId);
+}
+function leavingPending(guildId) {
+  return leaveTimers.has(guildId);
+}
+
+function fill(template, vars) {
+  const { nowMin } = getLocalNow();
+  const time = currentTimeBucket(nowMin);
+
+  return String(template ?? "")
+    .replaceAll("{channel}", vars.channel ?? "")
+    .replaceAll("{humans}", String(vars.humans ?? ""))
+    .replaceAll("{user}", vars.user ?? "someone")
+    .replaceAll("{time}", time)
+    .replaceAll("{state}", vars.state ?? "")
+    .replaceAll("{auto}", vars.auto ? "ON" : "OFF")
+    .replaceAll("{vcauto}", vars.vcauto ? "ON" : "OFF")
+    .replaceAll("{leaving}", vars.leaving ? "YES" : "NO")
+    .replaceAll("{watch}", vars.watch ?? "")
+    .replaceAll("{watchers}", vars.watch ?? "")
+    .replaceAll("{watchcount}", String(vars.watchcount ?? ""));
+}
+
+async function scheduleDelayedLeave(guildId) {
+  if (leaveTimers.has(guildId)) return;
+
+  leaveTimers.set(
+    guildId,
+    setTimeout(async () => {
+      leaveTimers.delete(guildId);
+
+      const guild = await client.guilds.fetch(guildId).catch(() => null);
+      if (!guild) return;
+      const channel = await guild.channels.fetch(VOICE_CHANNEL_ID).catch(() => null);
+      if (!channel) return;
+
+      const isVoice =
+        channel.type === ChannelType.GuildVoice || channel.type === ChannelType.GuildStageVoice;
+      if (!isVoice) return;
+
+      const { humansCount } = getHumanCountAndSoloNameFromChannel(channel);
+
+      if (humansCount >= 2) {
+        const conn = getVoiceConnection(guild.id);
+        if (conn) conn.destroy();
+      }
+
+      await evaluateAndAct(guildId);
+    }, LEAVE_DELAY_MS)
+  );
+}
+
+// -------------------- Commands (same as before) --------------------
+function requireAdmin(interaction) {
+  return (
+    interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild) ||
+    interaction.memberPermissions?.has(PermissionFlagsBits.ManageChannels)
+  );
+}
+
+client.on("interactionCreate", async (interaction) => {
+  if (!interaction.isChatInputCommand()) return;
+
+  if (!requireAdmin(interaction)) {
+    return interaction.reply({
+      content: "You need Manage Server or Manage Channels to do that.",
+      ephemeral: true,
+    });
+  }
+
+  if (interaction.commandName === "autostatus") {
+    const mode = interaction.options.getString("mode", true);
+    runtimeConfig.autoStatusEnabled = mode === "on";
+
+    if (runtimeConfig.autoStatusEnabled) runtimeConfig.manualStatus = null;
+
+    saveRuntimeConfig();
+    await evaluateAndAct(GUILD_ID);
+
+    return interaction.reply({
+      content: `Auto VC-status is now **${runtimeConfig.autoStatusEnabled ? "ON" : "OFF"}**.`,
+      ephemeral: true,
+    });
+  }
+
+  if (interaction.commandName === "vcstatus") {
+    const sub = interaction.options.getSubcommand();
+
+    if (sub === "show") {
+      return interaction.reply({
+        content:
+          `Auto: **${runtimeConfig.autoStatusEnabled ? "ON" : "OFF"}**\n` +
+          `Stored manual (only used when auto OFF): **${runtimeConfig.manualStatus ? "SET" : "none"}**`,
+        ephemeral: true,
+      });
+    }
+
+    if (sub === "clear") {
+      runtimeConfig.manualStatus = null;
+      saveRuntimeConfig();
+
+      await setVoiceChannelStatus("", "manual|cleared", { force: true });
+      await evaluateAndAct(GUILD_ID);
+
+      return interaction.reply({
+        content: "Cleared stored manual status (and cleared VC status).",
+        ephemeral: true,
+      });
+    }
+
+    if (sub === "set") {
+      const text = interaction.options.getString("text", true).slice(0, 500);
+      const lock = interaction.options.getBoolean("lock") ?? false;
+
+      if (lock) {
+        runtimeConfig.autoStatusEnabled = false;
+        runtimeConfig.manualStatus = text;
+        saveRuntimeConfig();
+        await setVoiceChannelStatus(text, "manual|locked", { force: true });
+
+        return interaction.reply({
+          content: "Set VC status and **turned AUTO OFF** (manual will stick).",
+          ephemeral: true,
+        });
+      }
+
+      if (!runtimeConfig.autoStatusEnabled) {
+        runtimeConfig.manualStatus = text;
+        saveRuntimeConfig();
+      }
+
+      await setVoiceChannelStatus(text, "manual|oneshot", { force: true });
+
+      return interaction.reply({
+        content: runtimeConfig.autoStatusEnabled
+          ? "Set VC status **now** (AUTO is ON, so it may change on the next auto update)."
+          : "Set VC status (AUTO is OFF, so it will stay).",
+        ephemeral: true,
+      });
+    }
+  }
+});
+
+// -------------------- Debounce + main logic --------------------
+const pending = new Map();
+function scheduleEvaluate(guildId) {
+  if (pending.has(guildId)) clearTimeout(pending.get(guildId));
+  pending.set(
+    guildId,
+    setTimeout(() => {
+      pending.delete(guildId);
+      evaluateAndAct(guildId).catch((e) => console.error("evaluateAndAct error:", e));
+    }, 500)
+  );
+}
+
+async function evaluateAndAct(guildId) {
+  const guild = await client.guilds.fetch(guildId).catch(() => null);
+  if (!guild) return;
+  const channel = await guild.channels.fetch(VOICE_CHANNEL_ID).catch(() => null);
+  if (!channel) return;
+
+  const isVoice =
+    channel.type === ChannelType.GuildVoice || channel.type === ChannelType.GuildStageVoice;
+  if (!isVoice) return;
+
+  const { humansCount: humans, soloUserName, watchNames, watchIds } =
+    getHumanCountAndSoloNameFromChannel(channel);
+
+  const watchCount = Array.isArray(watchIds) ? watchIds.length : 0;
+  const watchList = formatNameList(watchNames);
+  const watchSig =
+    watchCount > 0
+      ? crypto.createHash("sha1").update(watchIds.join(",")).digest("hex").slice(0, 8)
+      : "none";
+
+  const conn = getVoiceConnection(guild.id);
+
+  // cancel leave timer if <=1 human
+  if (humans <= 1) cancelLeaveTimer(guild.id);
+
+  // join/leave logic
+  if (humans === 1) {
+    if (!conn) {
+      joinVoiceChannel({
+        channelId: channel.id,
+        guildId: guild.id,
+        adapterCreator: guild.voiceAdapterCreator,
+        selfDeaf: true,
+        selfMute: true,
+      });
+    }
+  } else if (humans >= 2) {
+    if (conn) await scheduleDelayedLeave(guild.id);
+  } else {
+    // humans === 0 -> stay forever if already connected
+  }
+
+  const connected = Boolean(getVoiceConnection(guild.id));
+
+  if (DEBUG) {
+    console.log(
+      `👥 humans=${humans} connected=${connected} watch=${watchCount} membersInChannel=${channel.members.size}`
+    );
+  }
+
+  const state = computeState(humans);
+  const { nowMin } = getLocalNow();
+  const time = currentTimeBucket(nowMin);
+
+  const vcauto = runtimeConfig.autoStatusEnabled;
+  const leaving = leavingPending(guildId);
+
+  // rotation slots
+  const rotateSlot = VC_ROTATE_MS > 0 ? Math.floor(Date.now() / VC_ROTATE_MS) : 0;
+  const idleSlot =
+    VC_IDLE_ROTATE_MS > 0 && humans === 0 ? Math.floor(Date.now() / VC_IDLE_ROTATE_MS) : 0;
+
+  const session = getSession(guildId);
+
+  // ---- VC Status behavior ----
+  if (vcauto) {
+    const fpVC = `t=${time}|h=${humans}|c=${connected}|lv=${leaving}|rot=${rotateSlot}|idle=${idleSlot}|vcauto=${vcauto}|w=${watchCount}|ws=${watchSig}`;
+
+    if (session.vcFp !== fpVC) {
+      session.vcFp = fpVC;
+      session.vcEntry = bumpEntry("vc", guildId, fpVC);
+    }
+
+    const stableKeyVC = `vc|${fpVC}|entry=${session.vcEntry}`;
+
+    const template = vcEngine.pick(
+      { humans, connected, state, auto: vcauto, vcauto, leaving },
+      `${channel.name} • ${humans} • ${time}`,
+      stableKeyVC
+    );
+
+    let text = fill(template, {
+      channel: channel.name,
+      humans,
+      user: soloUserName,
+      state,
+      auto: vcauto,
+      vcauto,
+      leaving,
+      watch: watchList,
+      watchcount: watchCount,
+    });
+
+    // Auto-append watch users unless template already uses {watch}/{watchers}/{watchcount}
+    if (watchCount > 0) {
+      const tplHasWatch =
+        String(template).includes("{watch}") ||
+        String(template).includes("{watchers}") ||
+        String(template).includes("{watchcount}");
+
+      const mode = VC_WATCH_APPEND_MODE;
+      const shouldAppend = mode === "always" || (mode !== "never" && !tplHasWatch);
+
+      if (shouldAppend && watchList) {
+        const soloDup =
+          humans === 1 && watchCount === 1 && soloUserName && watchList === soloUserName;
+        if (!soloDup) {
+          const suffix = ` • ${VC_WATCH_PREFIX} ${watchList}`;
+          text = String(text + suffix).slice(0, 500);
+        }
+      }
+    }
+
+    const key = `auto|${fpVC}|entry=${session.vcEntry}`;
+    await setVoiceChannelStatus(text, key);
+  } else {
+    if (runtimeConfig.manualStatus) {
+      await setVoiceChannelStatus(runtimeConfig.manualStatus, "manual|stored");
+    }
+  }
+
+  // ---- Bot presence ----
+  const botAuto = true;
+  const fpBot = `t=${time}|h=${humans}|c=${connected}|lv=${leaving}|rot=${rotateSlot}|idle=${idleSlot}|vcauto=${vcauto}|w=${watchCount}|ws=${watchSig}`;
+
+  if (session.botFp !== fpBot) {
+    session.botFp = fpBot;
+    session.botEntry = bumpEntry("bot", guildId, fpBot);
+  }
+
+  const stableKeyBot = `bot|${fpBot}|entry=${session.botEntry}`;
+
+  const botTemplate = botEngine.pick(
+    { humans, connected, state, auto: botAuto, vcauto, leaving },
+    `Auto ON • ${channel.name}`,
+    stableKeyBot
+  );
+
+  const botText = fill(botTemplate, {
+    channel: channel.name,
+    humans,
+    user: soloUserName,
+    state,
+    auto: botAuto,
+    vcauto,
+    leaving,
+    watch: watchList,
+    watchcount: watchCount,
+  });
+
+  const botKey = `bot|${fpBot}|entry=${session.botEntry}`;
+  setBotPresence(botText, botKey);
+}
+
+client.once(Events.ClientReady, async () => {
+  console.log(`✅ Logged in as ${client.user.tag}`);
+
+  loadRuntimeConfig();
+
+  vcEngine.load();
+  vcEngine.watch();
+
+  botEngine.load();
+  botEngine.watch();
+
+  scheduleEvaluate(GUILD_ID);
+
+  // time-bucket refresh once per minute
+  setInterval(() => scheduleEvaluate(GUILD_ID), 60_000);
+});
+
+client.on("voiceStateUpdate", (oldState, newState) => {
+  const touchedTarget =
+    oldState.channelId === VOICE_CHANNEL_ID || newState.channelId === VOICE_CHANNEL_ID;
+  if (!touchedTarget) return;
+
+  const guildId = newState.guild?.id || oldState.guild?.id;
+  if (guildId !== GUILD_ID) return;
+
+  scheduleEvaluate(guildId);
+});
+
+client.login(TOKEN);
