@@ -10,13 +10,70 @@ const {
   PermissionFlagsBits,
   ActivityType,
   Events,
+  EmbedBuilder,
+  ActionRowBuilder,
+  StringSelectMenuBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+  AttachmentBuilder,
 } = require("discord.js");
-const { joinVoiceChannel, getVoiceConnection } = require("@discordjs/voice");
+const { joinVoiceChannel, getVoiceConnection, VoiceConnectionStatus } = require("@discordjs/voice");
+
+// Prevent crashes from unhandled errors (especially DAVE protocol errors)
+process.on('unhandledRejection', (err) => {
+  if (err?.message?.includes('DAVE protocol')) {
+    // Silently ignore DAVE errors - they don't affect basic presence
+    return;
+  }
+  console.error('Unhandled rejection:', err);
+});
+
+process.on('uncaughtException', (err) => {
+  if (err?.message?.includes('DAVE protocol')) {
+    // Silently ignore DAVE errors - they don't affect basic presence
+    return;
+  }
+  console.error('Uncaught exception:', err);
+});
 
 const TOKEN = process.env.DISCORD_TOKEN;
 const CLIENT_ID = process.env.CLIENT_ID;
 const GUILD_ID = process.env.GUILD_ID;
 const VOICE_CHANNEL_ID = process.env.VOICE_CHANNEL_ID;
+
+// GIF CDN API config
+const CDN_API_URL = process.env.CDN_API_URL || "";
+const CDN_API_KEY = process.env.CDN_API_KEY || "";
+const GIF_UPLOAD_ROLE_ID = process.env.GIF_UPLOAD_ROLE_ID || "";
+const GIF_MANAGE_ROLE_ID = process.env.GIF_MANAGE_ROLE_ID || "";
+// Default tags to always exclude from /gif random (comma-separated in .env)
+const GIF_DEFAULT_EXCLUDE = process.env.GIF_DEFAULT_EXCLUDE
+  ? process.env.GIF_DEFAULT_EXCLUDE.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean)
+  : [];
+
+// Per-channel tag exclusions storage
+const CHANNEL_EXCLUSIONS_FILE = path.join(__dirname, "channel_exclusions.json");
+
+function loadChannelExclusions() {
+  try {
+    if (fs.existsSync(CHANNEL_EXCLUSIONS_FILE)) {
+      return JSON.parse(fs.readFileSync(CHANNEL_EXCLUSIONS_FILE, "utf8"));
+    }
+  } catch (e) {
+    console.error("Failed to load channel exclusions:", e);
+  }
+  return {};
+}
+
+function saveChannelExclusions(data) {
+  fs.writeFileSync(CHANNEL_EXCLUSIONS_FILE, JSON.stringify(data, null, 2));
+}
+
+// Load channel exclusions on startup
+let channelExclusions = loadChannelExclusions();
 
 const LEAVE_DELAY_MS = Number(process.env.LEAVE_DELAY_MS ?? 15000);
 
@@ -62,7 +119,12 @@ if (!TOKEN || !CLIENT_ID || !GUILD_ID || !VOICE_CHANNEL_ID) {
 }
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildVoiceStates],
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+  ],
 });
 
 // -------------------- Persistent runtime config --------------------
@@ -473,15 +535,40 @@ let lastVcStatus = "";
 let lastVcStatusAt = 0;
 let lastVcKey = "";
 
-async function setVoiceChannelStatus(text, key, { force = false } = {}) {
+let lastVcHumans = null; // Track last human count for rate limiting decisions
+
+async function setVoiceChannelStatus(text, key, { force = false, humans = null } = {}) {
   const now = Date.now();
-  if (text === lastVcStatus && key === lastVcKey) return;
+  
+  // Skip if text hasn't changed at all
+  if (text === lastVcStatus) {
+    console.log(`[VC Status] Skipped - same text: "${text}"`);
+    return;
+  }
+
+  // Check if human count changed (significant context change)
+  const humansChanged = lastVcHumans !== null && lastVcHumans !== humans;
 
   if (!force) {
-    const sameKey = key === lastVcKey;
-    const minInterval = sameKey ? VC_STATUS_MIN_INTERVAL_MS : VC_STATUS_MIN_INTERVAL_ON_CHANGE_MS;
-    if (now - lastVcStatusAt < minInterval) return;
+    // Allow fast updates when human count changes (context shift)
+    // Apply longer rate limit only when idle AND humans count is stable
+    let minInterval;
+    if (humansChanged) {
+      minInterval = VC_STATUS_MIN_INTERVAL_ON_CHANGE_MS; // 750ms for context changes
+    } else if (humans === 0) {
+      minInterval = Math.max(VC_STATUS_MIN_INTERVAL_MS, 60000); // 60s when stable & idle
+    } else {
+      minInterval = VC_STATUS_MIN_INTERVAL_MS; // Normal interval when humans present
+    }
+    
+    const elapsed = now - lastVcStatusAt;
+    if (elapsed < minInterval) {
+      console.log(`[VC Status] Rate limited - elapsed ${elapsed}ms < ${minInterval}ms, humans=${humans}, changed=${humansChanged}`);
+      return;
+    }
   }
+  
+  console.log(`[VC Status] Updating: "${lastVcStatus}" -> "${text}" (humans=${humans}, force=${force})`)
 
   try {
     await client.rest.put(`/channels/${VOICE_CHANNEL_ID}/voice-status`, {
@@ -490,6 +577,7 @@ async function setVoiceChannelStatus(text, key, { force = false } = {}) {
     lastVcStatus = text;
     lastVcKey = key;
     lastVcStatusAt = now;
+    lastVcHumans = humans;
   } catch (e) {
     console.warn("⚠️ Failed to set voice channel status:", e?.rawError?.message || e?.message || e);
   }
@@ -586,8 +674,839 @@ function requireAdmin(interaction) {
   );
 }
 
+// -------------------- GIF Command Handlers --------------------
+function hasUploadRole(interaction) {
+  if (!GIF_UPLOAD_ROLE_ID) return true;
+  return interaction.member.roles.cache.has(GIF_UPLOAD_ROLE_ID);
+}
+
+async function handleGifUpload(interaction) {
+  // Check role permission
+  if (!hasUploadRole(interaction)) {
+    return interaction.reply({
+      content: "❌ You don't have permission to upload GIFs.",
+      ephemeral: true,
+    });
+  }
+
+  if (!CDN_API_URL || !CDN_API_KEY) {
+    return interaction.reply({
+      content: "❌ GIF CDN is not configured. Set CDN_API_URL and CDN_API_KEY in .env",
+      ephemeral: true,
+    });
+  }
+
+  const attachment = interaction.options.getAttachment("file", true);
+
+  // Validate it's a GIF
+  if (!attachment.name.toLowerCase().endsWith(".gif")) {
+    return interaction.reply({
+      content: "❌ Only GIF files are allowed.",
+      ephemeral: true,
+    });
+  }
+
+  // Validate size (10MB)
+  if (attachment.size > 10 * 1024 * 1024) {
+    return interaction.reply({
+      content: "❌ File too large (max 10MB).",
+      ephemeral: true,
+    });
+  }
+
+  // Always show tag selection menu
+  const availableTags = await fetchAvailableTags();
+  const customId = `slash_tags_${interaction.id}`;
+  const selectMenu = createTagSelectMenu(availableTags, customId);
+  
+  const customTagsBtn = new ButtonBuilder()
+    .setCustomId(`slash_customtags_${interaction.id}`)
+    .setLabel("✏️ Type Custom Tags")
+    .setStyle(ButtonStyle.Primary);
+  
+  const uploadBtn = new ButtonBuilder()
+    .setCustomId(`slash_upload_${interaction.id}`)
+    .setLabel("Upload without tags")
+    .setStyle(ButtonStyle.Secondary);
+  
+  const cancelBtn = new ButtonBuilder()
+    .setCustomId(`slash_cancel_${interaction.id}`)
+    .setLabel("Cancel")
+    .setStyle(ButtonStyle.Danger);
+  
+  const row1 = new ActionRowBuilder().addComponents(selectMenu);
+  const row2 = new ActionRowBuilder().addComponents(customTagsBtn, uploadBtn, cancelBtn);
+  
+  // Store pending upload
+  pendingUploads.set(interaction.id, {
+    gifUrl: attachment.url,
+    originalName: attachment.name,
+    userId: interaction.user.id,
+    channelId: interaction.channel.id,
+    selectedTags: [],
+  });
+  
+  // Auto-expire after 2 minutes
+  setTimeout(() => pendingUploads.delete(interaction.id), 120000);
+  
+  await interaction.reply({
+    content: "📤 **Select tags from dropdown** or click **Type Custom Tags** to enter your own:",
+    components: [row1, row2],
+    ephemeral: true,
+  });
+}
+
+async function handleGifRandom(interaction) {
+  if (!CDN_API_URL) {
+    return interaction.reply({
+      content: "❌ GIF CDN is not configured. Set CDN_API_URL in .env",
+      ephemeral: true,
+    });
+  }
+
+  const includeTags = interaction.options.getString("tags") || "";
+  const userExclude = interaction.options.getString("exclude") || "";
+  const ephemeral = interaction.options.getBoolean("hidden") ?? false;
+
+  // Get channel-specific exclusions
+  const channelId = interaction.channelId;
+  const channelExcludeList = channelExclusions[channelId] || [];
+
+  // Merge user exclusions with default and channel exclusions
+  const userExcludeList = userExclude
+    ? userExclude.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean)
+    : [];
+  const allExclusions = [...new Set([...GIF_DEFAULT_EXCLUDE, ...channelExcludeList, ...userExcludeList])];
+  const exclude = allExclusions.join(",");
+
+  // Process include tags
+  const includeTagsList = includeTags
+    ? includeTags.split(",").map((t) => t.trim().toLowerCase()).filter(Boolean)
+    : [];
+  const tags = includeTagsList.join(",");
+
+  await interaction.deferReply({ ephemeral });
+
+  try {
+    let url = CDN_API_URL.replace(/\/$/, "") + "/api-random.php";
+    const params = new URLSearchParams();
+    if (tags) params.append("tags", tags);
+    if (exclude) params.append("exclude", exclude);
+    if (params.toString()) url += `?${params.toString()}`;
+
+    console.log("Fetching random GIF from:", url);
+    const response = await fetch(url);
+    const responseText = await response.text();
+    console.log("Random GIF response:", responseText);
+    
+    let result;
+    try {
+      result = JSON.parse(responseText);
+    } catch (parseErr) {
+      console.error("GIF random parse error:", responseText);
+      return interaction.editReply({ content: "❌ Server returned invalid response." });
+    }
+    
+    console.log("Parsed result:", JSON.stringify(result));
+
+    if (result.success && result.url) {
+      // Ensure the URL is a valid absolute URL
+      let gifUrl = result.url;
+      if (!gifUrl.startsWith('http://') && !gifUrl.startsWith('https://')) {
+        gifUrl = CDN_API_URL.replace(/\/$/, "") + gifUrl;
+      }
+
+      // Just send the URL - Discord will auto-preview the GIF
+      return interaction.editReply({ content: gifUrl });
+    } else if (result.success && !result.url) {
+      // Success but no URL - shouldn't happen but handle it
+      console.error("GIF random: success but no URL", result);
+      return interaction.editReply({ content: "❌ Server returned no GIF URL. Try again." });
+    } else {
+      return interaction.editReply({
+        content: `❌ ${result.error || "No GIFs found"}`,
+      });
+    }
+  } catch (e) {
+    console.error("GIF random error:", e);
+    return interaction.editReply({ content: `❌ Failed to fetch GIF: ${e.message}` });
+  }
+}
+
+async function handleGifTags(interaction) {
+  if (!CDN_API_URL) {
+    return interaction.reply({
+      content: "❌ GIF CDN is not configured.",
+      ephemeral: true,
+    });
+  }
+
+  await interaction.deferReply();
+
+  try {
+    const url = CDN_API_URL.replace(/\/$/, "") + "/api.php";
+    const response = await fetch(url);
+    const result = await response.json();
+
+    if (result.status !== "success" || !result.gifs) {
+      return interaction.editReply({ content: "❌ Failed to fetch GIF data." });
+    }
+
+    // Collect all unique tags and count usage
+    const tagCounts = new Map();
+    for (const gif of result.gifs) {
+      if (gif.tags && Array.isArray(gif.tags)) {
+        for (const tag of gif.tags) {
+          const lower = tag.toLowerCase();
+          tagCounts.set(lower, (tagCounts.get(lower) || 0) + 1);
+        }
+      }
+    }
+
+    // Sort by count (descending)
+    const sorted = Array.from(tagCounts.entries()).sort((a, b) => b[1] - a[1]);
+
+    if (sorted.length === 0) {
+      return interaction.editReply({ content: "No tags found." });
+    }
+
+    // Format tags compactly
+    const tagLines = sorted.map(([tag, count]) => `\`${tag}\` ×${count}`);
+
+    // Split into 3 columns for inline fields
+    const itemsPerColumn = Math.ceil(tagLines.length / 3);
+    const columns = [[], [], []];
+    
+    tagLines.forEach((line, i) => {
+      const colIndex = Math.floor(i / itemsPerColumn);
+      if (colIndex < 3) columns[colIndex].push(line);
+    });
+
+    const embed = new EmbedBuilder()
+      .setColor(0xeb459e)
+      .setTitle("🏷️ GIF Tags");
+
+    // Add columns as inline fields
+    columns.forEach((col, i) => {
+      if (col.length > 0) {
+        embed.addFields({ 
+          name: i === 0 ? "Tags" : "\u200b", 
+          value: col.join("\n"), 
+          inline: true 
+        });
+      }
+    });
+
+    embed.setFooter({ 
+      text: `${sorted.length} tags • ${result.count} GIFs • /gif random tags:name` 
+    });
+
+    return interaction.editReply({ embeds: [embed] });
+  } catch (e) {
+    console.error("GIF tags error:", e);
+    return interaction.editReply({ content: `❌ Failed to fetch tags: ${e.message}` });
+  }
+}
+
+// -------------------- Channel Exclusion Management --------------------
+function hasManageRole(interaction) {
+  if (!GIF_MANAGE_ROLE_ID) return true; // No role configured = allow all
+  return interaction.member?.roles?.cache?.has(GIF_MANAGE_ROLE_ID) ?? false;
+}
+
+async function handleGifExclude(interaction) {
+  const sub = interaction.options.getSubcommand();
+  const channelId = interaction.channelId;
+
+  // Check for manage role
+  if (!hasManageRole(interaction)) {
+    return interaction.reply({
+      content: "❌ You don't have permission to manage channel exclusions.",
+      ephemeral: true,
+    });
+  }
+
+  if (sub === "add") {
+    const input = interaction.options.getString("tags", true);
+    const tags = input.split(",").map(t => t.toLowerCase().trim()).filter(Boolean);
+    
+    if (tags.length === 0) {
+      return interaction.reply({
+        content: "❌ Please provide at least one tag.",
+        ephemeral: true,
+      });
+    }
+    
+    if (!channelExclusions[channelId]) {
+      channelExclusions[channelId] = [];
+    }
+    
+    const added = [];
+    const skipped = [];
+    
+    for (const tag of tags) {
+      if (channelExclusions[channelId].includes(tag)) {
+        skipped.push(tag);
+      } else {
+        channelExclusions[channelId].push(tag);
+        added.push(tag);
+      }
+    }
+    
+    if (added.length > 0) {
+      saveChannelExclusions(channelExclusions);
+    }
+    
+    let message = "";
+    if (added.length > 0) {
+      message += `✅ Added: ${added.map(t => `\`${t}\``).join(", ")}`;
+    }
+    if (skipped.length > 0) {
+      message += `${message ? "\n" : ""}⚠️ Already excluded: ${skipped.map(t => `\`${t}\``).join(", ")}`;
+    }
+    
+    return interaction.reply({
+      content: message || "No changes made.",
+      ephemeral: true,
+    });
+  }
+
+  if (sub === "remove") {
+    const input = interaction.options.getString("tags", true);
+    const tags = input.split(",").map(t => t.toLowerCase().trim()).filter(Boolean);
+    
+    if (tags.length === 0) {
+      return interaction.reply({
+        content: "❌ Please provide at least one tag.",
+        ephemeral: true,
+      });
+    }
+    
+    if (!channelExclusions[channelId]) {
+      return interaction.reply({
+        content: "⚠️ No tags are excluded in this channel.",
+        ephemeral: true,
+      });
+    }
+    
+    const removed = [];
+    const notFound = [];
+    
+    for (const tag of tags) {
+      if (channelExclusions[channelId].includes(tag)) {
+        channelExclusions[channelId] = channelExclusions[channelId].filter(t => t !== tag);
+        removed.push(tag);
+      } else {
+        notFound.push(tag);
+      }
+    }
+    
+    if (channelExclusions[channelId].length === 0) {
+      delete channelExclusions[channelId];
+    }
+    
+    if (removed.length > 0) {
+      saveChannelExclusions(channelExclusions);
+    }
+    
+    let message = "";
+    if (removed.length > 0) {
+      message += `✅ Removed: ${removed.map(t => `\`${t}\``).join(", ")}`;
+    }
+    if (notFound.length > 0) {
+      message += `${message ? "\n" : ""}⚠️ Not found: ${notFound.map(t => `\`${t}\``).join(", ")}`;
+    }
+    
+    return interaction.reply({
+      content: message || "No changes made.",
+      ephemeral: true,
+    });
+  }
+
+  if (sub === "list") {
+    const tags = channelExclusions[channelId] || [];
+    
+    if (tags.length === 0) {
+      return interaction.reply({
+        content: "📋 No tags are excluded in this channel.\n" +
+          (GIF_DEFAULT_EXCLUDE.length > 0 
+            ? `\n**Server-wide exclusions:** ${GIF_DEFAULT_EXCLUDE.map(t => `\`${t}\``).join(", ")}`
+            : ""),
+        ephemeral: true,
+      });
+    }
+    
+    return interaction.reply({
+      content: `📋 **Excluded tags in this channel:**\n${tags.map(t => `\`${t}\``).join(", ")}` +
+        (GIF_DEFAULT_EXCLUDE.length > 0 
+          ? `\n\n**Server-wide exclusions:** ${GIF_DEFAULT_EXCLUDE.map(t => `\`${t}\``).join(", ")}`
+          : ""),
+      ephemeral: true,
+    });
+  }
+
+  if (sub === "clear") {
+    if (!channelExclusions[channelId] || channelExclusions[channelId].length === 0) {
+      return interaction.reply({
+        content: "⚠️ No tags are excluded in this channel.",
+        ephemeral: true,
+      });
+    }
+    
+    const count = channelExclusions[channelId].length;
+    delete channelExclusions[channelId];
+    saveChannelExclusions(channelExclusions);
+    
+    return interaction.reply({
+      content: `✅ Cleared ${count} excluded tag(s) from this channel.`,
+      ephemeral: true,
+    });
+  }
+}
+
+// -------------------- Reply-Based Upload System --------------------
+// Cache for pending uploads: messageId -> { gifUrl, userId, channelId, originalName }
+const pendingUploads = new Map();
+
+// Fetch available tags from the API
+async function fetchAvailableTags() {
+  try {
+    const url = CDN_API_URL.replace(/\/$/, "") + "/api.php";
+    const response = await fetch(url);
+    const result = await response.json();
+    
+    if (result.status !== "success" || !result.gifs) return [];
+    
+    const tagCounts = new Map();
+    for (const gif of result.gifs) {
+      if (gif.tags && Array.isArray(gif.tags)) {
+        for (const tag of gif.tags) {
+          const lower = tag.toLowerCase();
+          tagCounts.set(lower, (tagCounts.get(lower) || 0) + 1);
+        }
+      }
+    }
+    
+    // Sort by count and return top 25 (Discord limit)
+    return Array.from(tagCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 25)
+      .map(([tag, count]) => ({ tag, count }));
+  } catch (e) {
+    console.error("Failed to fetch tags:", e);
+    return [];
+  }
+}
+
+// Create tag selection components
+function createTagSelectMenu(availableTags, customId) {
+  const options = availableTags.map(({ tag, count }) => ({
+    label: tag,
+    value: tag,
+    description: `Used ${count} times`,
+  }));
+  
+  if (options.length === 0) {
+    options.push({ label: "No tags available", value: "_none", description: "Upload some GIFs first" });
+  }
+  
+  const selectMenu = new StringSelectMenuBuilder()
+    .setCustomId(customId)
+    .setPlaceholder("Select tags (optional)")
+    .setMinValues(0)
+    .setMaxValues(Math.min(options.length, 10))
+    .addOptions(options);
+  
+  return selectMenu;
+}
+
+// Upload a GIF to the CDN
+async function uploadGifToCdn(gifUrl, originalName, tags = []) {
+  const fileResponse = await fetch(gifUrl);
+  if (!fileResponse.ok) throw new Error("Failed to download GIF");
+  
+  const fileBuffer = Buffer.from(await fileResponse.arrayBuffer());
+  
+  const form = new FormData();
+  const blob = new Blob([fileBuffer], { type: "image/gif" });
+  form.append("file", blob, originalName);
+  if (tags.length > 0) form.append("tags", tags.join(","));
+  
+  const uploadUrl = CDN_API_URL.replace(/\/$/, "") + "/api-upload.php";
+  const uploadResponse = await fetch(uploadUrl, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${CDN_API_KEY}`,
+      "X-API-Key": CDN_API_KEY,
+    },
+    body: form,
+  });
+  
+  const responseText = await uploadResponse.text();
+  console.log("Upload response status:", uploadResponse.status);
+  console.log("Upload response headers:", Object.fromEntries(uploadResponse.headers.entries()));
+  console.log("Upload response body length:", responseText.length);
+  console.log("Upload response body:", responseText.substring(0, 1000));
+  
+  if (!responseText || responseText.length === 0) {
+    throw new Error(`Server returned empty response (status: ${uploadResponse.status})`);
+  }
+  
+  let result;
+  try {
+    result = JSON.parse(responseText);
+  } catch (e) {
+    console.error("JSON parse error:", e.message);
+    console.error("Full response:", responseText);
+    throw new Error(`Server returned invalid JSON (status: ${uploadResponse.status})`);
+  }
+  
+  return { result, status: uploadResponse.status };
+}
+
+// Create upload result embed
+function createUploadResultEmbed(result, status) {
+  if (result.success) {
+    const embed = new EmbedBuilder()
+      .setColor(0x57f287)
+      .setTitle("✅ GIF Uploaded!")
+      .setImage(result.url)
+      .addFields({ name: "Filename", value: result.filename, inline: true });
+    
+    if (result.tags?.length) {
+      embed.addFields({ name: "Tags", value: result.tags.join(", "), inline: true });
+    }
+    return { embeds: [embed], components: [] };
+  } else if (status === 409) {
+    const isExact = result.duplicate_type === "exact";
+    const embed = new EmbedBuilder()
+      .setColor(isExact ? 0xed4245 : 0xfee75c)
+      .setTitle(isExact ? "🚫 Exact Duplicate" : "⚠️ Similar Image Detected")
+      .setDescription(
+        isExact
+          ? "This exact GIF already exists!"
+          : `Similar to existing GIF${result.similarity ? ` (${result.similarity} match)` : ""}!`
+      )
+      .setImage(result.existing?.url)
+      .addFields({ name: "Existing File", value: result.existing?.filename || "Unknown" });
+    return { embeds: [embed], components: [] };
+  } else {
+    return { content: `❌ Upload failed: ${result.error || "Unknown error"}`, embeds: [], components: [] };
+  }
+}
+
+// Check if member has upload role
+function memberHasUploadRole(member) {
+  if (!GIF_UPLOAD_ROLE_ID) return true;
+  return member.roles.cache.has(GIF_UPLOAD_ROLE_ID);
+}
+
+// Handle message-based upload (reply to GIF with bot mention)
+client.on("messageCreate", async (message) => {
+  // Ignore bots and DMs
+  if (message.author.bot || !message.guild) return;
+  
+  // Check if bot is mentioned
+  if (!message.mentions.has(client.user)) return;
+  
+  // Check if this is a reply to another message
+  if (!message.reference?.messageId) return;
+  
+  // Check role permission
+  if (!memberHasUploadRole(message.member)) {
+    return message.reply({ content: "❌ You don't have permission to upload GIFs.", allowedMentions: { repliedUser: false } });
+  }
+  
+  if (!CDN_API_URL || !CDN_API_KEY) {
+    return message.reply({ content: "❌ GIF CDN is not configured.", allowedMentions: { repliedUser: false } });
+  }
+  
+  try {
+    // Fetch the replied-to message
+    const repliedMessage = await message.channel.messages.fetch(message.reference.messageId);
+    
+    // Look for GIF in attachments or embeds
+    let gifUrl = null;
+    let originalName = "uploaded.gif";
+    
+    // Check attachments
+    const gifAttachment = repliedMessage.attachments.find(a => 
+      a.name?.toLowerCase().endsWith(".gif") || a.contentType === "image/gif"
+    );
+    if (gifAttachment) {
+      gifUrl = gifAttachment.url;
+      originalName = gifAttachment.name || "uploaded.gif";
+    }
+    
+    // Check embeds for GIF
+    if (!gifUrl) {
+      for (const embed of repliedMessage.embeds) {
+        if (embed.image?.url?.includes(".gif")) {
+          gifUrl = embed.image.url;
+          break;
+        }
+        if (embed.thumbnail?.url?.includes(".gif")) {
+          gifUrl = embed.thumbnail.url;
+          break;
+        }
+      }
+    }
+    
+    // Check for Tenor/Giphy links in content
+    if (!gifUrl && repliedMessage.content) {
+      const tenorMatch = repliedMessage.content.match(/https:\/\/tenor\.com\/view\/[^\s]+/);
+      const giphyMatch = repliedMessage.content.match(/https:\/\/giphy\.com\/gifs\/[^\s]+/);
+      const directGifMatch = repliedMessage.content.match(/https?:\/\/[^\s]+\.gif/i);
+      
+      if (directGifMatch) gifUrl = directGifMatch[0];
+      // Note: Tenor/Giphy would need their API to get direct GIF URLs
+    }
+    
+    if (!gifUrl) {
+      return message.reply({ 
+        content: "❌ No GIF found in that message. Reply to a message with a GIF attachment.", 
+        allowedMentions: { repliedUser: false } 
+      });
+    }
+    
+    // Store pending upload data
+    pendingUploads.set(message.id, {
+      gifUrl,
+      originalName,
+      userId: message.author.id,
+      channelId: message.channel.id,
+      selectedTags: [],
+    });
+    
+    // Auto-expire after 2 minutes
+    setTimeout(() => pendingUploads.delete(message.id), 120000);
+    
+    // Create a button to open the tag selector (ephemeral when clicked)
+    const selectTagsBtn = new ButtonBuilder()
+      .setCustomId(`gif_openselect_${message.id}`)
+      .setLabel("Select Tags & Upload")
+      .setStyle(ButtonStyle.Primary)
+      .setEmoji("🏷️");
+    
+    const quickUploadBtn = new ButtonBuilder()
+      .setCustomId(`gif_upload_${message.id}`)
+      .setLabel("Upload without tags")
+      .setStyle(ButtonStyle.Secondary);
+    
+    const row = new ActionRowBuilder().addComponents(selectTagsBtn, quickUploadBtn);
+    
+    await message.reply({
+      content: `📤 **GIF detected!** Click below to upload.`,
+      components: [row],
+      allowedMentions: { repliedUser: false },
+    });
+    
+  } catch (e) {
+    console.error("Reply upload error:", e);
+    message.reply({ content: `❌ Error: ${e.message}`, allowedMentions: { repliedUser: false } });
+  }
+});
+
+// Handle select menu and button interactions for uploads
+client.on("interactionCreate", async (interaction) => {
+  // Handle modal submission for custom tags
+  if (interaction.isModalSubmit()) {
+    const isGifModal = interaction.customId.startsWith("gif_modal_");
+    const isSlashModal = interaction.customId.startsWith("slash_modal_");
+    
+    if (!isGifModal && !isSlashModal) return;
+    
+    const prefix = isGifModal ? "gif" : "slash";
+    const sessionId = interaction.customId.replace(`${prefix}_modal_`, "");
+    const pending = pendingUploads.get(sessionId);
+    
+    if (!pending || pending.userId !== interaction.user.id) {
+      return interaction.reply({ content: "❌ This upload session expired or isn't yours.", ephemeral: true });
+    }
+    
+    const tagsInput = interaction.fields.getTextInputValue("tags_input") || "";
+    pending.selectedTags = tagsInput.split(",").map(t => t.trim().toLowerCase()).filter(Boolean);
+    
+    // Proceed with upload
+    await interaction.deferUpdate();
+    
+    try {
+      await interaction.editReply({ content: "⏳ Uploading...", components: [] });
+      const { result, status } = await uploadGifToCdn(pending.gifUrl, pending.originalName, pending.selectedTags);
+      const response = createUploadResultEmbed(result, status);
+      await interaction.editReply(response);
+    } catch (e) {
+      console.error("Upload error:", e);
+      await interaction.editReply({ content: `❌ Upload failed: ${e.message}`, components: [] });
+    }
+    
+    pendingUploads.delete(sessionId);
+    return;
+  }
+  
+  // Handle tag selection (both reply-based "gif_" and slash command "slash_")
+  if (interaction.isStringSelectMenu()) {
+    const isGifTags = interaction.customId.startsWith("gif_tags_");
+    const isSlashTags = interaction.customId.startsWith("slash_tags_");
+    
+    if (!isGifTags && !isSlashTags) return;
+    
+    const prefix = isGifTags ? "gif" : "slash";
+    const sessionId = interaction.customId.replace(`${prefix}_tags_`, "");
+    const pending = pendingUploads.get(sessionId);
+    
+    if (!pending || pending.userId !== interaction.user.id) {
+      return interaction.reply({ content: "❌ This upload session expired or isn't yours.", ephemeral: true });
+    }
+    
+    pending.selectedTags = interaction.values.filter(v => v !== "_none");
+    
+    // Update message to show selected tags and add confirm button
+    const confirmBtn = new ButtonBuilder()
+      .setCustomId(`${prefix}_confirm_${sessionId}`)
+      .setLabel(`Upload with ${pending.selectedTags.length} tag(s)`)
+      .setStyle(ButtonStyle.Success);
+    
+    const cancelBtn = new ButtonBuilder()
+      .setCustomId(`${prefix}_cancel_${sessionId}`)
+      .setLabel("Cancel")
+      .setStyle(ButtonStyle.Danger);
+    
+    const row = new ActionRowBuilder().addComponents(confirmBtn, cancelBtn);
+    
+    await interaction.update({
+      content: `📤 **Selected tags:** ${pending.selectedTags.length > 0 ? pending.selectedTags.map(t => `\`${t}\``).join(", ") : "None"}\n\nClick **Upload** to confirm.`,
+      components: [row],
+    });
+    return;
+  }
+  
+  // Handle upload buttons (both "gif_" and "slash_" prefixes)
+  if (interaction.isButton()) {
+    const parts = interaction.customId.split("_");
+    const prefix = parts[0]; // "gif" or "slash"
+    const type = parts[1];   // "upload", "confirm", "cancel", or "openselect"
+    const sessionId = parts.slice(2).join("_"); // rejoin in case ID has underscores
+    
+    if (prefix !== "gif" && prefix !== "slash") return;
+    
+    const pending = pendingUploads.get(sessionId);
+    
+    // Handle "Select Tags" button - shows ephemeral tag menu
+    if (type === "openselect" && pending) {
+      if (pending.userId !== interaction.user.id) {
+        return interaction.reply({ content: "❌ This isn't your upload.", ephemeral: true });
+      }
+      
+      const availableTags = await fetchAvailableTags();
+      const selectMenu = createTagSelectMenu(availableTags, `${prefix}_tags_${sessionId}`);
+      
+      const customTagsBtn = new ButtonBuilder()
+        .setCustomId(`${prefix}_customtags_${sessionId}`)
+        .setLabel("✏️ Type Custom Tags")
+        .setStyle(ButtonStyle.Primary);
+      
+      const uploadBtn = new ButtonBuilder()
+        .setCustomId(`${prefix}_upload_${sessionId}`)
+        .setLabel("Upload without tags")
+        .setStyle(ButtonStyle.Secondary);
+      
+      const cancelBtn = new ButtonBuilder()
+        .setCustomId(`${prefix}_cancel_${sessionId}`)
+        .setLabel("Cancel")
+        .setStyle(ButtonStyle.Danger);
+      
+      const row1 = new ActionRowBuilder().addComponents(selectMenu);
+      const row2 = new ActionRowBuilder().addComponents(customTagsBtn, uploadBtn, cancelBtn);
+      
+      // Reply with ephemeral message containing the tag selector
+      return interaction.reply({
+        content: "📤 **Select tags from dropdown** or click **Type Custom Tags** to enter your own:",
+        components: [row1, row2],
+        ephemeral: true,
+      });
+    }
+    
+    // Handle "Custom Tags" button - opens a modal
+    if (type === "customtags" && pending) {
+      if (pending.userId !== interaction.user.id) {
+        return interaction.reply({ content: "❌ This isn't your upload.", ephemeral: true });
+      }
+      
+      const modal = new ModalBuilder()
+        .setCustomId(`${prefix}_modal_${sessionId}`)
+        .setTitle("Enter Tags");
+      
+      const tagsInput = new TextInputBuilder()
+        .setCustomId("tags_input")
+        .setLabel("Tags (comma-separated)")
+        .setPlaceholder("femboy, cute, cozy, ears")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(false)
+        .setMaxLength(200);
+      
+      if (pending.selectedTags.length > 0) {
+        tagsInput.setValue(pending.selectedTags.join(", "));
+      }
+      
+      const row = new ActionRowBuilder().addComponents(tagsInput);
+      modal.addComponents(row);
+      
+      return interaction.showModal(modal);
+    }
+    
+    if (type === "cancel") {
+      pendingUploads.delete(sessionId);
+      // Try to update the original message, or just reply
+      try {
+        await interaction.update({ content: "❌ Upload cancelled.", components: [] });
+      } catch {
+        await interaction.reply({ content: "❌ Upload cancelled.", ephemeral: true });
+      }
+      return;
+    }
+    
+    if ((type === "upload" || type === "confirm") && pending) {
+      if (pending.userId !== interaction.user.id) {
+        return interaction.reply({ content: "❌ This isn't your upload.", ephemeral: true });
+      }
+      
+      // Try to update, otherwise reply
+      try {
+        await interaction.update({ content: "⏳ Uploading...", components: [] });
+      } catch {
+        await interaction.deferReply({ ephemeral: true });
+      }
+      
+      try {
+        const { result, status } = await uploadGifToCdn(pending.gifUrl, pending.originalName, pending.selectedTags);
+        const response = createUploadResultEmbed(result, status);
+        await interaction.editReply(response);
+      } catch (e) {
+        console.error("Upload error:", e);
+        await interaction.editReply({ content: `❌ Upload failed: ${e.message}`, components: [] });
+      }
+      
+      pendingUploads.delete(sessionId);
+      return;
+    }
+  }
+});
+
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
+
+  // Handle GIF commands (separate permissions)
+  if (interaction.commandName === "gif") {
+    const sub = interaction.options.getSubcommand();
+    if (sub === "upload") return handleGifUpload(interaction);
+    if (sub === "random") return handleGifRandom(interaction);
+    if (sub === "tags") return handleGifTags(interaction);
+    if (sub === "add" || sub === "remove" || sub === "list" || sub === "clear") {
+      return handleGifExclude(interaction);
+    }
+    return;
+  }
 
   if (!requireAdmin(interaction)) {
     return interaction.reply({
@@ -702,29 +1621,63 @@ async function evaluateAndAct(guildId) {
       ? crypto.createHash("sha1").update(watchIds.join(",")).digest("hex").slice(0, 8)
       : "none";
 
-  const conn = getVoiceConnection(guild.id);
+  let conn = getVoiceConnection(guild.id);
+
+  // If the connection object exists but is actually disconnected/destroyed,
+  // destroy it so we can create a fresh one. Without this, the bot thinks
+  // it's still in the VC when Discord has actually kicked it.
+  if (conn) {
+    const status = conn.state?.status;
+    if (status === VoiceConnectionStatus.Disconnected || status === VoiceConnectionStatus.Destroyed) {
+      console.log(`🔌 Voice connection in bad state (${status}), destroying for reconnect...`);
+      try { conn.destroy(); } catch {}
+      conn = null;
+    }
+  }
 
   // cancel leave timer if <=1 human
   if (humans <= 1) cancelLeaveTimer(guild.id);
 
   // join/leave logic
-  if (humans === 1) {
+  // Bot should be in VC when 0 or 1 humans, leave when 2+
+  if (humans <= 1) {
     if (!conn) {
-      joinVoiceChannel({
-        channelId: channel.id,
-        guildId: guild.id,
-        adapterCreator: guild.voiceAdapterCreator,
-        selfDeaf: true,
-        selfMute: true,
-      });
+      try {
+        const newConn = joinVoiceChannel({
+          channelId: channel.id,
+          guildId: guild.id,
+          adapterCreator: guild.voiceAdapterCreator,
+          selfDeaf: true,
+          selfMute: true,
+        });
+        // Handle DAVE protocol errors gracefully (missing @snazzah/davey package)
+        newConn.on('error', (err) => {
+          if (err.message?.includes('DAVE protocol')) {
+            // Silently ignore DAVE errors - they don't affect basic presence
+          } else {
+            console.error('Voice connection error:', err);
+          }
+        });
+        // Auto-reconnect if the connection gets disconnected
+        newConn.on('stateChange', (oldState, newState) => {
+          if (newState.status === VoiceConnectionStatus.Disconnected) {
+            console.log('🔌 Voice connection disconnected, will reconnect on next evaluate cycle');
+            // Trigger a re-evaluate so the bot rejoins
+            scheduleEvaluate(guild.id);
+          }
+        });
+        conn = newConn;
+      } catch (err) {
+        console.error('Failed to join voice channel:', err);
+      }
     }
-  } else if (humans >= 2) {
-    if (conn) await scheduleDelayedLeave(guild.id);
   } else {
-    // humans === 0 -> stay forever if already connected
+    // humans >= 2 -> schedule leave
+    if (conn) await scheduleDelayedLeave(guild.id);
   }
 
-  const connected = Boolean(getVoiceConnection(guild.id));
+  const connected = Boolean(getVoiceConnection(guild.id)) && 
+    getVoiceConnection(guild.id)?.state?.status === VoiceConnectionStatus.Ready;
 
   if (DEBUG) {
     console.log(
@@ -796,10 +1749,10 @@ async function evaluateAndAct(guildId) {
     }
 
     const key = `auto|${fpVC}|entry=${session.vcEntry}`;
-    await setVoiceChannelStatus(text, key);
+    await setVoiceChannelStatus(text, key, { humans });
   } else {
     if (runtimeConfig.manualStatus) {
-      await setVoiceChannelStatus(runtimeConfig.manualStatus, "manual|stored");
+      await setVoiceChannelStatus(runtimeConfig.manualStatus, "manual|stored", { humans });
     }
   }
 

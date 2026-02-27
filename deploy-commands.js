@@ -32,6 +32,63 @@ const commands = [
     )
     .addSubcommand((sub) => sub.setName("clear").setDescription("Clear stored manual status (and clear VC status)"))
     .addSubcommand((sub) => sub.setName("show").setDescription("Show current auto/manual state")),
+
+  new SlashCommandBuilder()
+    .setName("gif")
+    .setDescription("GIF commands - upload and get random GIFs")
+    .addSubcommand((sub) =>
+      sub
+        .setName("upload")
+        .setDescription("Upload a GIF to the CDN (requires upload role)")
+        .addAttachmentOption((opt) =>
+          opt.setName("file").setDescription("The GIF file to upload").setRequired(true)
+        )
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName("random")
+        .setDescription("Get a random GIF")
+        .addStringOption((opt) =>
+          opt.setName("tags").setDescription("Only show GIFs with these tags (comma-separated)").setRequired(false)
+        )
+        .addStringOption((opt) =>
+          opt.setName("exclude").setDescription("Additional tags to exclude (comma-separated)").setRequired(false)
+        )
+        .addBooleanOption((opt) =>
+          opt.setName("hidden").setDescription("Only show the result to you").setRequired(false)
+        )
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName("tags")
+        .setDescription("Show all available tags with usage counts")
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName("add")
+        .setDescription("Add tag(s) to exclude in this channel")
+        .addStringOption((opt) =>
+          opt.setName("tags").setDescription("Tag(s) to exclude (comma-separated for multiple)").setRequired(true)
+        )
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName("remove")
+        .setDescription("Remove tag(s) from this channel's exclusion list")
+        .addStringOption((opt) =>
+          opt.setName("tags").setDescription("Tag(s) to remove (comma-separated for multiple)").setRequired(true)
+        )
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName("list")
+        .setDescription("List excluded tags for this channel")
+    )
+    .addSubcommand((sub) =>
+      sub
+        .setName("clear")
+        .setDescription("Clear all excluded tags for this channel")
+    ),
 ].map((c) => c.toJSON());
 
 const rest = new REST({ version: "10" }).setToken(process.env.DISCORD_TOKEN);
