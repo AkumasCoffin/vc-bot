@@ -3,6 +3,7 @@ require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const sharp = require("sharp");
 const {
   Client,
   GatewayIntentBits,
@@ -47,6 +48,8 @@ const VOICE_CHANNEL_ID = process.env.VOICE_CHANNEL_ID;
 // GIF CDN API config
 const CDN_API_URL = process.env.CDN_API_URL || "";
 const CDN_API_KEY = process.env.CDN_API_KEY || "";
+// Allowed image extensions for upload (will be converted to GIF if not already)
+const ALLOWED_IMAGE_EXTS = [".gif", ".png", ".jpg", ".jpeg", ".webp"];
 const GIF_UPLOAD_ROLE_ID = process.env.GIF_UPLOAD_ROLE_ID || "";
 const GIF_MANAGE_ROLE_ID = process.env.GIF_MANAGE_ROLE_ID || "";
 // Default tags to always exclude from /gif random (comma-separated in .env)
@@ -698,10 +701,11 @@ async function handleGifUpload(interaction) {
 
   const attachment = interaction.options.getAttachment("file", true);
 
-  // Validate it's a GIF
-  if (!attachment.name.toLowerCase().endsWith(".gif")) {
+  // Validate it's an allowed image type
+  const ext = path.extname(attachment.name).toLowerCase();
+  if (!ALLOWED_IMAGE_EXTS.includes(ext)) {
     return interaction.reply({
-      content: "❌ Only GIF files are allowed.",
+      content: `❌ Unsupported file type. Allowed: ${ALLOWED_IMAGE_EXTS.join(", ")}`,
       ephemeral: true,
     });
   }
@@ -713,6 +717,8 @@ async function handleGifUpload(interaction) {
       ephemeral: true,
     });
   }
+
+  const isGif = ext === ".gif";
 
   // Always show tag selection menu
   const availableTags = await fetchAvailableTags();
@@ -741,6 +747,7 @@ async function handleGifUpload(interaction) {
   pendingUploads.set(interaction.id, {
     gifUrl: attachment.url,
     originalName: attachment.name,
+    needsConversion: !isGif,
     userId: interaction.user.id,
     channelId: interaction.channel.id,
     selectedTags: [],
@@ -749,8 +756,9 @@ async function handleGifUpload(interaction) {
   // Auto-expire after 2 minutes
   setTimeout(() => pendingUploads.delete(interaction.id), 120000);
   
+  const conversionNote = !isGif ? `\n⚙️ *This ${ext} image will be converted to GIF automatically.*` : "";
   await interaction.reply({
-    content: "📤 **Select tags from dropdown** or click **Type Custom Tags** to enter your own:",
+    content: `📤 **Select tags from dropdown** or click **Type Custom Tags** to enter your own:${conversionNote}`,
     components: [row1, row2],
     ephemeral: true,
   });
@@ -1120,16 +1128,33 @@ function createTagSelectMenu(availableTags, customId) {
   return selectMenu;
 }
 
+// Convert an image buffer to GIF using sharp
+async function convertToGif(inputBuffer) {
+  return await sharp(inputBuffer, { animated: true })
+    .gif()
+    .toBuffer();
+}
+
 // Upload a GIF to the CDN
-async function uploadGifToCdn(gifUrl, originalName, tags = []) {
+async function uploadGifToCdn(gifUrl, originalName, tags = [], needsConversion = false) {
   const fileResponse = await fetch(gifUrl);
-  if (!fileResponse.ok) throw new Error("Failed to download GIF");
+  if (!fileResponse.ok) throw new Error("Failed to download image");
   
-  const fileBuffer = Buffer.from(await fileResponse.arrayBuffer());
+  let fileBuffer = Buffer.from(await fileResponse.arrayBuffer());
+  
+  // Convert non-GIF images to GIF format
+  if (needsConversion) {
+    console.log(`Converting ${originalName} to GIF...`);
+    fileBuffer = await convertToGif(fileBuffer);
+    console.log(`Conversion complete (${fileBuffer.length} bytes)`);
+  }
+  
+  // Ensure filename ends with .gif
+  const gifName = originalName.replace(/\.\w+$/, ".gif");
   
   const form = new FormData();
   const blob = new Blob([fileBuffer], { type: "image/gif" });
-  form.append("file", blob, originalName);
+  form.append("file", blob, gifName);
   if (tags.length > 0) form.append("tags", tags.join(","));
   
   const uploadUrl = CDN_API_URL.replace(/\/$/, "") + "/api-upload.php";
@@ -1225,46 +1250,54 @@ client.on("messageCreate", async (message) => {
     // Fetch the replied-to message
     const repliedMessage = await message.channel.messages.fetch(message.reference.messageId);
     
-    // Look for GIF in attachments or embeds
+    // Look for GIF or image in attachments or embeds
     let gifUrl = null;
     let originalName = "uploaded.gif";
+    let needsConversion = false;
     
-    // Check attachments
-    const gifAttachment = repliedMessage.attachments.find(a => 
-      a.name?.toLowerCase().endsWith(".gif") || a.contentType === "image/gif"
-    );
-    if (gifAttachment) {
-      gifUrl = gifAttachment.url;
-      originalName = gifAttachment.name || "uploaded.gif";
+    // Check attachments for GIFs first, then other images
+    const imageAttachment = repliedMessage.attachments.find(a => {
+      const ext = path.extname(a.name || "").toLowerCase();
+      return ALLOWED_IMAGE_EXTS.includes(ext) || a.contentType?.startsWith("image/");
+    });
+    if (imageAttachment) {
+      gifUrl = imageAttachment.url;
+      originalName = imageAttachment.name || "uploaded.gif";
+      const ext = path.extname(originalName).toLowerCase();
+      needsConversion = ext !== ".gif";
     }
     
-    // Check embeds for GIF
+    // Check embeds for GIF or images
     if (!gifUrl) {
       for (const embed of repliedMessage.embeds) {
-        if (embed.image?.url?.includes(".gif")) {
-          gifUrl = embed.image.url;
-          break;
-        }
-        if (embed.thumbnail?.url?.includes(".gif")) {
-          gifUrl = embed.thumbnail.url;
-          break;
+        const imgUrl = embed.image?.url || embed.thumbnail?.url;
+        if (imgUrl) {
+          gifUrl = imgUrl;
+          const ext = path.extname(new URL(imgUrl).pathname).toLowerCase();
+          needsConversion = ext !== ".gif";
+          if (!needsConversion) break; // Prefer GIFs, but take what we can get
         }
       }
     }
     
-    // Check for Tenor/Giphy links in content
+    // Check for direct image links in content
     if (!gifUrl && repliedMessage.content) {
-      const tenorMatch = repliedMessage.content.match(/https:\/\/tenor\.com\/view\/[^\s]+/);
-      const giphyMatch = repliedMessage.content.match(/https:\/\/giphy\.com\/gifs\/[^\s]+/);
       const directGifMatch = repliedMessage.content.match(/https?:\/\/[^\s]+\.gif/i);
+      const directImgMatch = repliedMessage.content.match(/https?:\/\/[^\s]+\.(png|jpg|jpeg|webp)/i);
       
-      if (directGifMatch) gifUrl = directGifMatch[0];
+      if (directGifMatch) {
+        gifUrl = directGifMatch[0];
+        needsConversion = false;
+      } else if (directImgMatch) {
+        gifUrl = directImgMatch[0];
+        needsConversion = true;
+      }
       // Note: Tenor/Giphy would need their API to get direct GIF URLs
     }
     
     if (!gifUrl) {
       return message.reply({ 
-        content: "❌ No GIF found in that message. Reply to a message with a GIF attachment.", 
+        content: "❌ No image found in that message. Reply to a message with an image attachment.", 
         allowedMentions: { repliedUser: false } 
       });
     }
@@ -1273,6 +1306,7 @@ client.on("messageCreate", async (message) => {
     pendingUploads.set(message.id, {
       gifUrl,
       originalName,
+      needsConversion,
       userId: message.author.id,
       channelId: message.channel.id,
       selectedTags: [],
@@ -1295,8 +1329,12 @@ client.on("messageCreate", async (message) => {
     
     const row = new ActionRowBuilder().addComponents(selectTagsBtn, quickUploadBtn);
     
+    const detectedMsg = needsConversion
+      ? `📤 **Image detected!** It will be converted to GIF before uploading.`
+      : `📤 **GIF detected!** Click below to upload.`;
+    
     await message.reply({
-      content: `📤 **GIF detected!** Click below to upload.`,
+      content: detectedMsg,
       components: [row],
       allowedMentions: { repliedUser: false },
     });
@@ -1331,8 +1369,8 @@ client.on("interactionCreate", async (interaction) => {
     await interaction.deferUpdate();
     
     try {
-      await interaction.editReply({ content: "⏳ Uploading...", components: [] });
-      const { result, status } = await uploadGifToCdn(pending.gifUrl, pending.originalName, pending.selectedTags);
+      await interaction.editReply({ content: pending.needsConversion ? "⏳ Converting & uploading..." : "⏳ Uploading...", components: [] });
+      const { result, status } = await uploadGifToCdn(pending.gifUrl, pending.originalName, pending.selectedTags, pending.needsConversion);
       const response = createUploadResultEmbed(result, status);
       await interaction.editReply(response);
     } catch (e) {
@@ -1473,13 +1511,13 @@ client.on("interactionCreate", async (interaction) => {
       
       // Try to update, otherwise reply
       try {
-        await interaction.update({ content: "⏳ Uploading...", components: [] });
+        await interaction.update({ content: pending.needsConversion ? "⏳ Converting & uploading..." : "⏳ Uploading...", components: [] });
       } catch {
         await interaction.deferReply({ ephemeral: true });
       }
       
       try {
-        const { result, status } = await uploadGifToCdn(pending.gifUrl, pending.originalName, pending.selectedTags);
+        const { result, status } = await uploadGifToCdn(pending.gifUrl, pending.originalName, pending.selectedTags, pending.needsConversion);
         const response = createUploadResultEmbed(result, status);
         await interaction.editReply(response);
       } catch (e) {

@@ -39,9 +39,9 @@ const commands = [
     .addSubcommand((sub) =>
       sub
         .setName("upload")
-        .setDescription("Upload a GIF to the CDN (requires upload role)")
+        .setDescription("Upload a GIF/image to the CDN (requires upload role)")
         .addAttachmentOption((opt) =>
-          opt.setName("file").setDescription("The GIF file to upload").setRequired(true)
+          opt.setName("file").setDescription("Image to upload (.gif, .png, .jpg, .webp — non-GIFs are converted)").setRequired(true)
         )
     )
     .addSubcommand((sub) =>
