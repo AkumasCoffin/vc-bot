@@ -719,6 +719,7 @@ async function handleGifUpload(interaction) {
   }
 
   const isGif = ext === ".gif";
+  const nameOpt = interaction.options.getString("name") || "";
 
   // Always show tag selection menu
   const availableTags = await fetchAvailableTags();
@@ -751,14 +752,16 @@ async function handleGifUpload(interaction) {
     userId: interaction.user.id,
     channelId: interaction.channel.id,
     selectedTags: [],
+    displayName: nameOpt,
   });
   
   // Auto-expire after 2 minutes
   setTimeout(() => pendingUploads.delete(interaction.id), 120000);
   
   const conversionNote = !isGif ? `\n⚙️ *This ${ext} image will be converted to GIF automatically.*` : "";
+  const nameNote = nameOpt ? `\n📝 **Name:** ${nameOpt}` : "";
   await interaction.reply({
-    content: `📤 **Select tags from dropdown** or click **Type Custom Tags** to enter your own:${conversionNote}`,
+    content: `📤 **Select tags from dropdown** or click **Type Custom Tags** to enter your own:${nameNote}${conversionNote}`,
     components: [row1, row2],
     ephemeral: true,
   });
@@ -818,16 +821,32 @@ async function handleGifRandom(interaction) {
     console.log("Parsed result:", JSON.stringify(result));
 
     if (result.success && result.url) {
-      // Ensure the URL is a valid absolute URL
       let gifUrl = result.url;
       if (!gifUrl.startsWith('http://') && !gifUrl.startsWith('https://')) {
         gifUrl = CDN_API_URL.replace(/\/$/, "") + gifUrl;
       }
 
-      // Just send the URL - Discord will auto-preview the GIF
-      return interaction.editReply({ content: gifUrl });
+      const embed = new EmbedBuilder()
+        .setColor(0xeb459e)
+        .setImage(gifUrl);
+
+      if (result.display_name) {
+        embed.setTitle(result.display_name);
+      }
+
+      const footerParts = [];
+      if (result.tags?.length) {
+        footerParts.push(result.tags.join(", "));
+      }
+      if (result.matched_count > 1) {
+        footerParts.push(`${result.matched_count} matches`);
+      }
+      if (footerParts.length) {
+        embed.setFooter({ text: footerParts.join(" • ") });
+      }
+
+      return interaction.editReply({ embeds: [embed] });
     } else if (result.success && !result.url) {
-      // Success but no URL - shouldn't happen but handle it
       console.error("GIF random: success but no URL", result);
       return interaction.editReply({ content: "❌ Server returned no GIF URL. Try again." });
     } else {
@@ -860,7 +879,7 @@ async function handleGifTags(interaction) {
       return interaction.editReply({ content: "❌ Failed to fetch GIF data." });
     }
 
-    // Collect all unique tags and count usage
+    // Build tag usage counts from gifs
     const tagCounts = new Map();
     for (const gif of result.gifs) {
       if (gif.tags && Array.isArray(gif.tags)) {
@@ -871,42 +890,76 @@ async function handleGifTags(interaction) {
       }
     }
 
-    // Sort by count (descending)
-    const sorted = Array.from(tagCounts.entries()).sort((a, b) => b[1] - a[1]);
-
-    if (sorted.length === 0) {
+    if (tagCounts.size === 0) {
       return interaction.editReply({ content: "No tags found." });
     }
 
-    // Format tags compactly
-    const tagLines = sorted.map(([tag, count]) => `\`${tag}\` ×${count}`);
+    // Map Font Awesome icon classes to Discord-friendly emoji
+    const FA_EMOJI = {
+      "fas fa-exclamation-triangle": "⚠️",
+      "fas fa-comment": "💬",
+      "fas fa-paw": "🐾",
+      "fas fa-rainbow": "🏳️‍🌈",
+      "fas fa-heart": "❤️",
+      "fas fa-hands": "🤲",
+      "fas fa-sparkles": "✨",
+      "fas fa-shirt": "👕",
+      "fas fa-palette": "🎨",
+      "fas fa-image": "🖼️",
+      "fas fa-ellipsis": "•••",
+    };
 
-    // Split into 3 columns for inline fields
-    const itemsPerColumn = Math.ceil(tagLines.length / 3);
-    const columns = [[], [], []];
-    
-    tagLines.forEach((line, i) => {
-      const colIndex = Math.floor(i / itemsPerColumn);
-      if (colIndex < 3) columns[colIndex].push(line);
-    });
+    function faToEmoji(iconClass) {
+      if (!iconClass) return "";
+      return FA_EMOJI[iconClass] || "";
+    }
+
+    function formatTagList(tags) {
+      return tags
+        .map(t => {
+          const count = tagCounts.get(t.toLowerCase());
+          return count ? `\`${t}\` ×${count}` : null;
+        })
+        .filter(Boolean)
+        .join(", ");
+    }
 
     const embed = new EmbedBuilder()
       .setColor(0xeb459e)
       .setTitle("🏷️ GIF Tags");
 
-    // Add columns as inline fields
-    columns.forEach((col, i) => {
-      if (col.length > 0) {
-        embed.addFields({ 
-          name: i === 0 ? "Tags" : "\u200b", 
-          value: col.join("\n"), 
-          inline: true 
-        });
-      }
-    });
+    if (result.tag_groups?.length) {
+      for (const group of result.tag_groups) {
+        const value = formatTagList(group.tags || []);
+        if (!value) continue;
 
-    embed.setFooter({ 
-      text: `${sorted.length} tags • ${result.count} GIFs • /gif random tags:name` 
+        const icon = faToEmoji(group.icon);
+        const excludeNote = group.default_exclude ? " ⛔" : "";
+        const name = `${icon} ${group.name}${excludeNote}`.trim();
+
+        embed.addFields({ name, value });
+      }
+    }
+
+    const ungrouped = result.ungrouped_tags || [];
+    if (ungrouped.length > 0) {
+      const value = formatTagList(ungrouped);
+      if (value) {
+        const icon = faToEmoji(result.ungrouped_icon);
+        const label = result.ungrouped_label || "Other";
+        embed.addFields({ name: `${icon} ${label}`.trim(), value });
+      }
+    }
+
+    // Fallback: flat sorted list when no groups exist
+    if (!result.tag_groups?.length && ungrouped.length === 0) {
+      const sorted = Array.from(tagCounts.entries()).sort((a, b) => b[1] - a[1]);
+      const value = sorted.map(([tag, count]) => `\`${tag}\` ×${count}`).join(", ");
+      embed.addFields({ name: "Tags", value: value || "None" });
+    }
+
+    embed.setFooter({
+      text: `${tagCounts.size} tags • ${result.count} GIFs • /gif random tags:<name>`,
     });
 
     return interaction.editReply({ embeds: [embed] });
@@ -1136,7 +1189,7 @@ async function convertToGif(inputBuffer) {
 }
 
 // Upload a GIF to the CDN
-async function uploadGifToCdn(gifUrl, originalName, tags = [], needsConversion = false) {
+async function uploadGifToCdn(gifUrl, originalName, tags = [], needsConversion = false, displayName = "") {
   const fileResponse = await fetch(gifUrl);
   if (!fileResponse.ok) throw new Error("Failed to download image");
   
@@ -1156,6 +1209,7 @@ async function uploadGifToCdn(gifUrl, originalName, tags = [], needsConversion =
   const blob = new Blob([fileBuffer], { type: "image/gif" });
   form.append("file", blob, gifName);
   if (tags.length > 0) form.append("tags", tags.join(","));
+  if (displayName) form.append("name", displayName);
   
   const uploadUrl = CDN_API_URL.replace(/\/$/, "") + "/api-upload.php";
   const uploadResponse = await fetch(uploadUrl, {
@@ -1174,7 +1228,10 @@ async function uploadGifToCdn(gifUrl, originalName, tags = [], needsConversion =
   console.log("Upload response body:", responseText.substring(0, 1000));
   
   if (!responseText || responseText.length === 0) {
-    throw new Error(`Server returned empty response (status: ${uploadResponse.status})`);
+    const hint = uploadResponse.status === 500
+      ? " CDN server error - check upload-debug.log on the CDN host."
+      : "";
+    throw new Error(`Server returned empty response (status: ${uploadResponse.status})${hint}`);
   }
   
   let result;
@@ -1192,9 +1249,12 @@ async function uploadGifToCdn(gifUrl, originalName, tags = [], needsConversion =
 // Create upload result embed
 function createUploadResultEmbed(result, status) {
   if (result.success) {
+    const title = result.display_name
+      ? `✅ ${result.display_name}`
+      : "✅ GIF Uploaded!";
     const embed = new EmbedBuilder()
       .setColor(0x57f287)
-      .setTitle("✅ GIF Uploaded!")
+      .setTitle(title)
       .setImage(result.url)
       .addFields({ name: "Filename", value: result.filename, inline: true });
     
@@ -1310,6 +1370,7 @@ client.on("messageCreate", async (message) => {
       userId: message.author.id,
       channelId: message.channel.id,
       selectedTags: [],
+      displayName: "",
     });
     
     // Auto-expire after 2 minutes
@@ -1364,13 +1425,14 @@ client.on("interactionCreate", async (interaction) => {
     
     const tagsInput = interaction.fields.getTextInputValue("tags_input") || "";
     pending.selectedTags = tagsInput.split(",").map(t => t.trim().toLowerCase()).filter(Boolean);
+    pending.displayName = (interaction.fields.getTextInputValue("name_input") || "").trim();
     
     // Proceed with upload
     await interaction.deferUpdate();
     
     try {
       await interaction.editReply({ content: pending.needsConversion ? "⏳ Converting & uploading..." : "⏳ Uploading...", components: [] });
-      const { result, status } = await uploadGifToCdn(pending.gifUrl, pending.originalName, pending.selectedTags, pending.needsConversion);
+      const { result, status } = await uploadGifToCdn(pending.gifUrl, pending.originalName, pending.selectedTags, pending.needsConversion, pending.displayName);
       const response = createUploadResultEmbed(result, status);
       await interaction.editReply(response);
     } catch (e) {
@@ -1473,7 +1535,19 @@ client.on("interactionCreate", async (interaction) => {
       
       const modal = new ModalBuilder()
         .setCustomId(`${prefix}_modal_${sessionId}`)
-        .setTitle("Enter Tags");
+        .setTitle("Upload Details");
+      
+      const nameInput = new TextInputBuilder()
+        .setCustomId("name_input")
+        .setLabel("Display Name (optional)")
+        .setPlaceholder("e.g. Happy Dance")
+        .setStyle(TextInputStyle.Short)
+        .setRequired(false)
+        .setMaxLength(100);
+      
+      if (pending.displayName) {
+        nameInput.setValue(pending.displayName);
+      }
       
       const tagsInput = new TextInputBuilder()
         .setCustomId("tags_input")
@@ -1487,8 +1561,9 @@ client.on("interactionCreate", async (interaction) => {
         tagsInput.setValue(pending.selectedTags.join(", "));
       }
       
-      const row = new ActionRowBuilder().addComponents(tagsInput);
-      modal.addComponents(row);
+      const nameRow = new ActionRowBuilder().addComponents(nameInput);
+      const tagsRow = new ActionRowBuilder().addComponents(tagsInput);
+      modal.addComponents(nameRow, tagsRow);
       
       return interaction.showModal(modal);
     }
@@ -1517,7 +1592,7 @@ client.on("interactionCreate", async (interaction) => {
       }
       
       try {
-        const { result, status } = await uploadGifToCdn(pending.gifUrl, pending.originalName, pending.selectedTags, pending.needsConversion);
+        const { result, status } = await uploadGifToCdn(pending.gifUrl, pending.originalName, pending.selectedTags, pending.needsConversion, pending.displayName);
         const response = createUploadResultEmbed(result, status);
         await interaction.editReply(response);
       } catch (e) {

@@ -43,6 +43,9 @@ const commands = [
         .addAttachmentOption((opt) =>
           opt.setName("file").setDescription("Image to upload (.gif, .png, .jpg, .webp — non-GIFs are converted)").setRequired(true)
         )
+        .addStringOption((opt) =>
+          opt.setName("name").setDescription("Display name for the GIF").setRequired(false)
+        )
     )
     .addSubcommand((sub) =>
       sub
