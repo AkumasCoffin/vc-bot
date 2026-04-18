@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "pools": {
+    "any": [],
+    "empty": [],
+    "solo": [],
+    "crowded": [],
+    "connected": []
+  },
+  "rules": [
+    { "cond": "time=midnight humans=0", "text": "Quiet hours" },
+    { "cond": "time=midnight humans=1", "text": "Just {soloUserName}" },
+    { "cond": "time=midnight humans>=2", "text": "{humans} up late" },
+
+    { "cond": "time=dawn humans=0", "text": "Early idle" },
+    { "cond": "time=dawn humans=1", "text": "1:1 — quiet morning" },
+    { "cond": "time=dawn humans>=2", "text": "{humans} early birds" },
+
+    { "cond": "time=morning humans=0", "text": "Empty channel" },
+    { "cond": "time=morning humans=1", "text": "Solo with {soloUserName}" },
+    { "cond": "time=morning humans>=2", "text": "{humans} in VC" },
+
+    { "cond": "time=midday humans=0", "text": "Lunch-lull" },
+    { "cond": "time=midday humans=1", "text": "1:1 — afternoon" },
+    { "cond": "time=midday humans>=2", "text": "{humans} around" },
+
+    { "cond": "time=dusk humans=0", "text": "Winding down" },
+    { "cond": "time=dusk humans=1", "text": "Solo vibes" },
+    { "cond": "time=dusk humans>=2", "text": "{humans} hanging out" },
+
+    { "cond": "time=night humans=0", "text": "Offline mode" },
+    { "cond": "time=night humans=1", "text": "Night owl: {soloUserName}" },
+    { "cond": "time=night humans>=2", "text": "{humans} owls" }
+  ]
+}

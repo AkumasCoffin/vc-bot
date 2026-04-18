@@ -13,6 +13,8 @@ pnpm-debug.log*
 
 # Runtime / generated
 runtime_config.json
+vc_statuses.json
+bot_statuses.json
 *.pid
 
 # OS / editor

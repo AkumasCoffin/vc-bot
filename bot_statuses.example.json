@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "pools": {
+    "any": [],
+    "empty": [],
+    "solo": [],
+    "crowded": [],
+    "connected": []
+  },
+  "rules": [
+    { "cond": "time=midnight humans=0", "text": "lurking" },
+    { "cond": "time=midnight humans>=1", "text": "late-night duty" },
+
+    { "cond": "time=dawn humans=0", "text": "quiet idle" },
+    { "cond": "time=dawn humans>=1", "text": "good morning" },
+
+    { "cond": "time=morning humans=0", "text": "standing by" },
+    { "cond": "time=morning humans>=1", "text": "on the clock" },
+
+    { "cond": "time=midday humans=0", "text": "idle" },
+    { "cond": "time=midday humans>=1", "text": "in the mix" },
+
+    { "cond": "time=dusk humans=0", "text": "waiting" },
+    { "cond": "time=dusk humans>=1", "text": "wind-down shift" },
+
+    { "cond": "time=night humans=0", "text": "eyes closed" },
+    { "cond": "time=night humans>=1", "text": "keeping watch" }
+  ]
+}

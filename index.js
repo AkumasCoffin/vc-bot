@@ -21,12 +21,12 @@ const {
   TextInputStyle,
   AttachmentBuilder,
 } = require("discord.js");
-const { joinVoiceChannel, getVoiceConnection, VoiceConnectionStatus } = require("@discordjs/voice");
+const { joinVoiceChannel, getVoiceConnection, VoiceConnectionStatus, entersState } = require("@discordjs/voice");
 
 // Prevent crashes from unhandled errors (especially DAVE protocol errors)
 process.on('unhandledRejection', (err) => {
   if (err?.message?.includes('DAVE protocol')) {
-    // Silently ignore DAVE errors - they don't affect basic presence
+    console.warn('[DAVE] unhandled rejection (suppressed from crash):', err.message);
     return;
   }
   console.error('Unhandled rejection:', err);
@@ -34,7 +34,7 @@ process.on('unhandledRejection', (err) => {
 
 process.on('uncaughtException', (err) => {
   if (err?.message?.includes('DAVE protocol')) {
-    // Silently ignore DAVE errors - they don't affect basic presence
+    console.warn('[DAVE] uncaught exception (suppressed from crash):', err.message);
     return;
   }
   console.error('Uncaught exception:', err);
@@ -1739,9 +1739,19 @@ async function evaluateAndAct(guildId) {
   // If the connection object exists but is actually disconnected/destroyed,
   // destroy it so we can create a fresh one. Without this, the bot thinks
   // it's still in the VC when Discord has actually kicked it.
+  // Also catches Signalling/Connecting that never progresses to Ready
+  // (silent voice-WS handshake failure), which otherwise zombies forever.
   if (conn) {
     const status = conn.state?.status;
-    if (status === VoiceConnectionStatus.Disconnected || status === VoiceConnectionStatus.Destroyed) {
+    const readyAt = conn._readyAt || 0;
+    const stuckNotReady =
+      status !== VoiceConnectionStatus.Ready &&
+      (readyAt === 0 ? (Date.now() - (conn._createdAt || Date.now())) > 20_000 : true);
+    if (
+      status === VoiceConnectionStatus.Disconnected ||
+      status === VoiceConnectionStatus.Destroyed ||
+      stuckNotReady
+    ) {
       console.log(`🔌 Voice connection in bad state (${status}), destroying for reconnect...`);
       try { conn.destroy(); } catch {}
       conn = null;
@@ -1763,21 +1773,29 @@ async function evaluateAndAct(guildId) {
           selfDeaf: true,
           selfMute: true,
         });
+        newConn._createdAt = Date.now();
         // Handle DAVE protocol errors gracefully (missing @snazzah/davey package)
         newConn.on('error', (err) => {
           if (err.message?.includes('DAVE protocol')) {
-            // Silently ignore DAVE errors - they don't affect basic presence
+            console.warn('[DAVE] voice connection error (non-fatal):', err.message);
           } else {
             console.error('Voice connection error:', err);
           }
         });
-        // Auto-reconnect if the connection gets disconnected
         newConn.on('stateChange', (oldState, newState) => {
+          console.log(`🔊 voice state ${oldState.status} -> ${newState.status}`);
+          if (newState.status === VoiceConnectionStatus.Ready) {
+            newConn._readyAt = Date.now();
+          }
           if (newState.status === VoiceConnectionStatus.Disconnected) {
             console.log('🔌 Voice connection disconnected, will reconnect on next evaluate cycle');
-            // Trigger a re-evaluate so the bot rejoins
             scheduleEvaluate(guild.id);
           }
+        });
+        entersState(newConn, VoiceConnectionStatus.Ready, 20_000).catch(() => {
+          console.log('🔌 Voice connection failed to reach Ready in 20s, destroying for retry');
+          try { newConn.destroy(); } catch {}
+          scheduleEvaluate(guild.id);
         });
         conn = newConn;
       } catch (err) {
